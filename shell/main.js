@@ -16,12 +16,12 @@
 //   DSH_DEVTOOLS=1         open detached DevTools.
 'use strict'
 
-const { app, BrowserWindow, dialog } = require('electron')
+const { app, BrowserWindow, dialog, shell: electronShell } = require('electron')
 const { spawn, execFile } = require('node:child_process')
-const http = require('node:http')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { availableUpdate, fetchPublicReleases, parseVersion, shouldCheck } = require('./update.js')
 
 const SMOKE = process.env.DSH_SMOKE === '1'
 const SMOKE_OUT = process.env.DSH_SMOKE_OUT || path.join(__dirname, 'smoke.png')
@@ -42,6 +42,8 @@ const DSH_BIN = path.join(ROOT, 'app', 'node_modules', '@deepseek-ai', 'dsh', 'l
 const DSH_HOME = path.join(ROOT, 'dsh-home')
 const WORKSPACE = path.join(ROOT, 'workspace')
 const LOG_PATH = path.join(DSH_HOME, 'logs', 'server.log')
+const MANIFEST_PATH = path.join(ROOT, 'manifest.json')
+const UPDATE_STATE_PATH = path.join(DSH_HOME, 'update-state.json')
 const APP_ICON = path.join(__dirname, 'icon.ico')
 
 const URL_PATTERN = /dsh web: (http:\/\/\S+)/
@@ -61,6 +63,76 @@ function ensureDirs() {
 
 function appendLog(text) {
   try { fs.appendFileSync(LOG_PATH, `${text}${os.EOL}`) } catch { /* read-only fallback: log to stderr only */ }
+}
+
+function readUpdateState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(UPDATE_STATE_PATH, 'utf8'))
+    return state !== null && typeof state === 'object' && !Array.isArray(state) ? state : {}
+  } catch (error) {
+    if (error.code !== 'ENOENT') appendLog(`update state ignored: ${error.message}`)
+    return {}
+  }
+}
+
+function writeUpdateState(state) {
+  try {
+    fs.writeFileSync(UPDATE_STATE_PATH, `${JSON.stringify(state, null, 2)}${os.EOL}`, 'utf8')
+  } catch (error) {
+    appendLog(`update state write failed: ${error.message}`)
+  }
+}
+
+async function maybePromptForUpdate() {
+  if (SMOKE || process.env.DSH_UPDATE_CHECK === '0' || !fs.existsSync(MANIFEST_PATH)) return
+  let manifest
+  try {
+    manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'))
+  } catch (error) {
+    appendLog(`update check skipped: manifest unreadable: ${error.message}`)
+    return
+  }
+  if (parseVersion(manifest.dshVersion) === null) {
+    appendLog('update check skipped: manifest dshVersion is invalid')
+    return
+  }
+  const state = readUpdateState()
+  if (!shouldCheck(state.lastCheckedAt)) return
+
+  let update = null
+  try {
+    update = availableUpdate(manifest.dshVersion, await fetchPublicReleases())
+  } catch (error) {
+    appendLog(`update check failed: ${error.message}`)
+  } finally {
+    state.lastCheckedAt = new Date().toISOString()
+    writeUpdateState(state)
+  }
+  if (update === null || mainWindow === null || mainWindow.isDestroyed()) return
+
+  const locale = app.getLocale().toLowerCase()
+  const isChinese = locale === 'zh' || locale.startsWith('zh-')
+  const options = isChinese
+    ? {
+        type: 'info',
+        title: 'DeepSeek Harness Portable 更新',
+        message: `发现新版本 ${update.version}`,
+        detail: `当前版本：${manifest.dshVersion}\n新版本：${update.version}\n\n下载前请在 GitHub Release 中核对 SHA256。更新便携版时请保留 dsh-home 和 workspace。`,
+        buttons: ['打开下载页面', '稍后提醒'],
+        defaultId: 0,
+        cancelId: 1,
+      }
+    : {
+        type: 'info',
+        title: 'DeepSeek Harness Portable update',
+        message: `Version ${update.version} is available`,
+        detail: `Current version: ${manifest.dshVersion}\nNew version: ${update.version}\n\nVerify the SHA256 in the GitHub Release before updating. Preserve dsh-home and workspace when replacing the portable package.`,
+        buttons: ['Open download page', 'Remind me later'],
+        defaultId: 0,
+        cancelId: 1,
+      }
+  const result = await dialog.showMessageBox(mainWindow, options)
+  if (result.response === 0) await electronShell.openExternal(update.releaseUrl)
 }
 
 function killServerTree() {
@@ -175,6 +247,7 @@ function serveServerUrl(url) {
       } else {
         mainWindow.show()
         mainWindow.focus()
+        maybePromptForUpdate().catch((error) => appendLog(`update prompt failed: ${error.message}`))
       }
     })
     mainWindow.loadURL(url).catch((error) => fatal(`could not load ${url}: ${error.message}`))

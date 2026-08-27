@@ -108,7 +108,7 @@ if (-not $DshVersion) {
   $meta = Invoke-RestMethod -Uri 'https://registry.npmjs.org/@deepseek-ai/dsh'
   $DshVersion = [string]$meta.'dist-tags'.latest
 }
-if ($DshVersion -notmatch '^\d+\.\d+\.\d+(-rc\.\d+)?$') { throw "unexpected version format: $DshVersion" }
+if ($DshVersion -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "unexpected version format: $DshVersion" }
 if ($NodeVersion -notmatch '^v?\d+\.\d+\.\d+$') { throw "unexpected Node version: $NodeVersion" }
 if (-not $NodeVersion.StartsWith('v')) { $NodeVersion = 'v' + $NodeVersion }
 
@@ -181,12 +181,19 @@ if (-not (Test-Path (Join-Path $electronDir 'dist\electron.exe'))) {
   if ($LASTEXITCODE -ne 0) { throw "electron install.js failed (exit $LASTEXITCODE)" }
 }
 if (-not (Test-Path (Join-Path $electronDir 'dist\electron.exe'))) { throw 'electron binary missing after install.js' }
+$electronZipName = "electron-v$ElectronVersion-win32-x64.zip"
+$electronCacheRoot = if ($env:ELECTRON_CACHE) { $env:ELECTRON_CACHE } else { Join-Path $env:LOCALAPPDATA 'electron\Cache' }
+$electronZip = Get-ChildItem $electronCacheRoot -Recurse -File -Filter $electronZipName -ErrorAction SilentlyContinue |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+if (-not $electronZip) { throw "Electron cache archive missing after install.js: $electronZipName" }
 
 # ── 5. stage the shell app and run the packager ──────────────────────────────
 $stagingShell = Join-Path $staging 'app'
 New-Item -ItemType Directory -Force -Path $stagingShell | Out-Null
 Copy-Item (Join-Path $psRoot 'shell\package.json') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\main.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\update.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagingShell -ErrorAction Stop
 
 Write-Output '=== electron-packager ==='
@@ -199,7 +206,8 @@ if (-not $packagerCli) { throw '@electron/packager bin not found under shell-too
 & (Join-Path $build 'runtime\node.exe') $packagerCli $stagingShell 'DshDesktop' `
   --platform=win32 --arch=x64 --out=$profile --overwrite `
   --icon=(Join-Path $stagingShell 'icon.ico') `
-  --electron-version=$ElectronVersion --app-version=1.0.0 --no-prune
+  --electron-version=$ElectronVersion --electron-zip-dir=$($electronZip.DirectoryName) `
+  --app-version=$DshVersion --no-prune
 if ($LASTEXITCODE -ne 0) { throw "electron-packager failed (exit $LASTEXITCODE)" }
 $packed = Join-Path $profile 'DshDesktop-win32-x64'
 if (-not (Test-Path $packed)) { throw "packager output missing: $packed" }
@@ -214,7 +222,9 @@ Rename-Item $exe (Join-Path $pkg 'DeepSeek-Harness.exe')
 Copy-Item -Recurse -Force (Join-Path $build 'runtime') (Join-Path $pkg 'runtime')
 Copy-Item -Recurse -Force $app (Join-Path $pkg 'app')
 New-Item -ItemType Directory -Force -Path (Join-Path $pkg 'dsh-home'), (Join-Path $pkg 'workspace') | Out-Null
-Copy-Item (Join-Path $psRoot 'README.txt') (Join-Path $pkg 'README.txt')
+$readme = Get-Content (Join-Path $psRoot 'README.txt') -Raw
+$readme = [regex]::Replace($readme, '(?m)^版本：.*$', "版本：dsh $DshVersion / Node $NodeVersion / Electron $ElectronVersion")
+Set-Content (Join-Path $pkg 'README.txt') -Value $readme -Encoding utf8 -NoNewline
 Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
 
 $manifest = [ordered]@{
@@ -223,6 +233,7 @@ $manifest = [ordered]@{
   dshVersion = $DshVersion
   nodeVersion = $NodeVersion
   electronVersion = $ElectronVersion
+  updateFeed = 'https://github.com/maiziman/deepseek-harness-portable/releases'
   builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   runtimeSource = if ((Test-Path (Join-Path $runtimeSrc 'node.exe')) -and -not $ForceDownloadNode) { 'local-reuse' } else { 'https://nodejs.org/dist/' }
   nodeExeSha256 = (Get-FileHash (Join-Path $pkg 'runtime\node.exe') -Algorithm SHA256).Hash.ToLower()

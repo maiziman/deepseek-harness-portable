@@ -38,6 +38,11 @@ else { Expand-Archive -Path $ZipPath -DestinationPath $WorkDir -Force }
 $pkgRoot = Join-Path $WorkDir 'DeepSeek-Harness'
 $exe = Join-Path $pkgRoot 'DeepSeek-Harness.exe'
 if (-not (Test-Path $exe)) { throw "extraction incomplete: $exe missing" }
+$shellArchive = Join-Path $pkgRoot 'resources\app.asar'
+$unpackedUpdateModule = Join-Path $pkgRoot 'resources\app\update.js'
+if (-not (Test-Path $shellArchive) -and -not (Test-Path $unpackedUpdateModule)) {
+  throw 'extraction incomplete: packaged desktop shell missing'
+}
 Write-Output ('[1/4] extraction OK: {0} files' -f (Get-ChildItem $pkgRoot -Recurse -File).Count)
 
 # ── 2. manifest + node runtime ───────────────────────────────────────────────
@@ -46,6 +51,10 @@ if (-not (Test-Path $manifestPath)) { throw 'manifest.json missing' }
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 $nodeVer = & (Join-Path $pkgRoot 'runtime\node.exe') --version
 if ($nodeVer.Trim() -ne $manifest.nodeVersion) { throw "node version mismatch: $($nodeVer.Trim()) != $($manifest.nodeVersion)" }
+if ($manifest.updateFeed -ne 'https://github.com/maiziman/deepseek-harness-portable/releases') { throw "unexpected update feed: $($manifest.updateFeed)" }
+$readme = Get-Content (Join-Path $pkgRoot 'README.txt') -Raw
+$versionLine = "版本：dsh $($manifest.dshVersion) / Node $($manifest.nodeVersion) / Electron $($manifest.electronVersion)"
+if (-not $readme.Contains($versionLine)) { throw 'README.txt does not report the manifest component versions' }
 Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2}' -f $manifest.dshVersion, $manifest.nodeVersion, $manifest.electronVersion)
 
 # ── 3. smoke: boot the app, capture the UI ───────────────────────────────────

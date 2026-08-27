@@ -44,6 +44,7 @@ No API key is bundled. Windows SmartScreen may show an unrecognized-app warning 
 | **Portable by design** | Settings, sessions, plugins, and logs stay under `dsh-home` beside the app. Move or back up the folder as one unit. |
 | **Verifiable releases** | Node.js downloads are checked against official SHA256 files; each package records exact component versions and ships with Release checksums. |
 | **Clean-machine tested** | Every push builds and boots on fresh Windows Server 2022 and 2025 GitHub runners before artifacts are published. |
+| **Update aware** | The desktop app checks published GitHub Releases at most once a day and prompts before opening the verified download page. It never replaces files silently. |
 
 ### Portable ZIP or the official npm install?
 
@@ -51,7 +52,7 @@ No API key is bundled. Windows SmartScreen may show an unrecognized-app warning 
 |---|---|---|
 | Best for | Trying the app, non-technical users, removable drives | Developers and managed Node.js environments |
 | Setup | Extract and double-click | Install Node.js 22.19+ and npm package |
-| Updates | Download a new ZIP and carry over `dsh-home` | Update through npm |
+| Updates | The app reports published updates; download the new ZIP and carry over `dsh-home` | Update through npm |
 | Runtime | Bundled and pinned | Uses the machine's Node.js installation |
 
 ## Compatibility and trust
@@ -93,6 +94,13 @@ Close the app and delete its folder. The portable build creates no installer or 
 <summary><strong>Can I use the command line?</strong></summary>
 
 Yes. Run `dsh.cmd web` for the Web UI or `dsh.cmd --profile headless "task"` for a headless task.
+
+</details>
+
+<details>
+<summary><strong>How do updates work?</strong></summary>
+
+The app checks this repository's published Releases at most once every 24 hours. A newer portable package opens an opt-in prompt with the current and new dsh versions. The app does not download or replace files automatically; verify the Release checksum, close the app, extract the new package, and preserve `dsh-home` and `workspace`. Set `DSH_UPDATE_CHECK=0` before launch to disable the check.
 
 </details>
 

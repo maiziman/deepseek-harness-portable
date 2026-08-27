@@ -1,6 +1,6 @@
 DeepSeek Harness 便携桌面版（Windows x64）
 ==========================================
-版本：dsh 0.1.1-rc.2 / Node v24.19.0 / Electron 44.0.0
+版本：构建时自动写入；也可查看 manifest.json。
 系统要求：Windows 10 21H2 及以上（64 位）。
 无需安装 Node.js、npm 或任何其他运行环境，无需管理员权限。
 
@@ -17,18 +17,24 @@ DeepSeek Harness 便携桌面版（Windows x64）
 - 卸载：直接删除整个文件夹。不写注册表，不残留任何系统文件。
 - 服务器日志：dsh-home\logs\server.log。
 
-三、命令行用法（可选）
+三、更新
+- 程序每 24 小时最多检查一次已公开的 GitHub Release。
+- 发现新版时会先询问，再打开下载页面；不会静默下载或覆盖程序。
+- 更新前请核对 Release 中的 SHA256，关闭程序并保留 dsh-home 与 workspace。
+- 如需禁用检查，请在启动前设置环境变量 DSH_UPDATE_CHECK=0。
+
+四、命令行用法（可选）
 在文件夹内打开 cmd 后运行：
   dsh.cmd web --port 8080        以指定端口启动（默认自动挑空闲端口）
   dsh.cmd --profile headless "任务"   运行一个一次性任务并退出
 
-四、常见问题
+五、常见问题
 - Windows SmartScreen 拦截：点「更多信息」→「仍要运行」。
   （程序内含 Node.js 官方签名的 node.exe；本包校验和见 manifest.json）
 - 提示缺少系统 DLL：安装微软 VC++ 运行库（x64，2022 版）。
 - 端口占用：程序会自动选择空闲端口，无需手动处理。
-- 断网可用：本地界面无需联网，仅在调用模型 API 时联网。
+- 断网可用：本地界面无需联网；更新检查失败不会阻止启动，模型调用仍需联网。
 
-五、构建信息
+六、构建信息
 本包由 portable-desktop\build-portable.ps1 构建；
 manifest.json 记录了 dsh / Node / Electron 版本与关键文件 SHA256。

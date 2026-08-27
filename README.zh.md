@@ -44,6 +44,7 @@
 | **真正便携** | 设置、会话、插件和日志都在程序旁的 `dsh-home` 中；整个文件夹可一起移动和备份。 |
 | **发布可验证** | Node.js 下载会与官方 SHA256 文件核对；每个包记录精确组件版本，并随 Release 提供校验和。 |
 | **全新系统验证** | 每次推送都在全新的 Windows Server 2022 和 2025 GitHub runner 上完成构建与真实启动。 |
+| **主动提示更新** | 桌面程序每天最多检查一次已公开的 GitHub Release，发现新版后先询问，再打开经过验证的下载页面；不会静默替换文件。 |
 
 ### 便携 ZIP 还是官方 npm 安装？
 
@@ -51,7 +52,7 @@
 |---|---|---|
 | 更适合 | 快速体验、非技术用户、移动硬盘/U 盘 | 开发者和统一管理 Node.js 的环境 |
 | 准备工作 | 解压并双击 | 安装 Node.js 22.19+ 和 npm 包 |
-| 更新方式 | 下载新 ZIP，并迁移 `dsh-home` | 通过 npm 更新 |
+| 更新方式 | 程序提示已公开的新版本；下载新 ZIP 并迁移 `dsh-home` | 通过 npm 更新 |
 | 运行时 | 已内置并固定版本 | 使用电脑上的 Node.js |
 
 ## 兼容性与可信依据
@@ -93,6 +94,13 @@
 <summary><strong>能从命令行使用吗？</strong></summary>
 
 可以。运行 `dsh.cmd web` 打开 Web UI，或用 `dsh.cmd --profile headless "任务"` 执行无界面任务。
+
+</details>
+
+<details>
+<summary><strong>程序如何检查更新？</strong></summary>
+
+程序每 24 小时最多检查一次本仓库已经公开的 Release。发现更高版本时，会显示当前和新版 dsh 版本，由你决定是否打开下载页。程序不会自动下载或覆盖文件；请核对 Release 校验和、关闭程序、解压新包，并保留 `dsh-home` 和 `workspace`。如需禁用检查，可在启动前设置 `DSH_UPDATE_CHECK=0`。
 
 </details>
 

@@ -30,6 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Test desktop update logic
+        shell: pwsh
+        run: |
+          node --test .\shell\update.test.js
+
       - name: Build portable package
         shell: pwsh
         run: |

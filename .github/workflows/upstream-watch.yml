@@ -1,0 +1,150 @@
+# Detect new official @deepseek-ai/dsh packages, verify a matching portable
+# build on both supported Windows runner generations, and prepare a Draft
+# Release. Drafts are the publication gate: users see an update only after a
+# maintainer reviews and publishes the Release.
+name: dsh-upstream-watch
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      dsh_version:
+        description: Optional published dsh version to evaluate instead of npm latest
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dsh-upstream-watch
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      dsh_version: ${{ steps.detect.outputs.dsh_version }}
+      prerelease: ${{ steps.detect.outputs.prerelease }}
+      should_build: ${{ steps.detect.outputs.should_build }}
+      tag: ${{ steps.detect.outputs.tag }}
+    steps:
+      - name: Detect an unpublished upstream version
+        id: detect
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REQUESTED_VERSION: ${{ inputs.dsh_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = ([string]$env:REQUESTED_VERSION).Trim()
+          if (-not $version) {
+            $metadata = Invoke-RestMethod -Uri 'https://registry.npmjs.org/@deepseek-ai/dsh'
+            $version = [string]$metadata.'dist-tags'.latest
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') {
+            throw "unexpected @deepseek-ai/dsh version: $version"
+          }
+
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            Authorization = "Bearer $env:GH_TOKEN"
+            'X-GitHub-Api-Version' = '2022-11-28'
+          }
+          $releases = @(Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:REPOSITORY/releases?per_page=100")
+          $assetName = "DeepSeek-Harness-win64-v$version.zip"
+          $marker = "<!-- dsh-version: $version -->"
+          $alreadyPackaged = $false
+          foreach ($release in $releases) {
+            $hasAsset = @($release.assets | Where-Object { $_.name -eq $assetName }).Count -gt 0
+            if ($hasAsset -or ([string]$release.body).Contains($marker)) {
+              $alreadyPackaged = $true
+              break
+            }
+          }
+
+          "dsh_version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($version.Contains('-').ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "should_build=$(((-not $alreadyPackaged)).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "tag=dsh-v$version" >> $env:GITHUB_OUTPUT
+          if ($alreadyPackaged) {
+            Write-Output "dsh $version already has a portable Release or Draft Release"
+          } else {
+            Write-Output "dsh $version needs a verified portable Draft Release"
+          }
+
+  build-and-verify:
+    needs: detect
+    if: needs.detect.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+          - os: windows-2025
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test desktop update logic
+        shell: pwsh
+        run: |
+          node --test .\shell\update.test.js
+
+      - name: Build upstream portable package
+        shell: pwsh
+        env:
+          DSH_VERSION: ${{ needs.detect.outputs.dsh_version }}
+        run: |
+          .\build-portable.ps1 -DshVersion $env:DSH_VERSION -ElectronMirror github
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          .\verify-package.ps1
+
+      - name: Upload verified package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-portable-${{ matrix.os }}-${{ needs.detect.outputs.dsh_version }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          retention-days: 14
+
+  draft-release:
+    needs: [detect, build-and-verify]
+    if: needs.detect.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download the Windows 2025 verified package
+        uses: actions/download-artifact@v4
+        with:
+          name: dsh-portable-windows-2025-${{ needs.detect.outputs.dsh_version }}
+          path: release-assets
+
+      - name: Create Draft Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.detect.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: DeepSeek Harness Portable ${{ needs.detect.outputs.dsh_version }}
+          draft: true
+          prerelease: ${{ needs.detect.outputs.prerelease }}
+          fail_on_unmatched_files: true
+          body: |
+            <!-- dsh-version: ${{ needs.detect.outputs.dsh_version }} -->
+            Automated portable candidate for official `@deepseek-ai/dsh@${{ needs.detect.outputs.dsh_version }}`.
+
+            Before publishing this Draft Release:
+
+            - Review upstream release notes and compatibility changes.
+            - Spot-check the ZIP on Windows 10 or 11.
+            - Confirm `SHA256SUMS.txt` matches the attached ZIP.
+
+            The attached package passed clean builds and real UI boot probes on Windows Server 2022 and 2025.
+          files: |
+            release-assets/*.zip
+            release-assets/SHA256SUMS.txt
