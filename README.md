@@ -108,7 +108,7 @@ The app checks this repository's published Releases at most once every 24 hours.
 <details>
 <summary><strong>Why can the first launch take longer?</strong></summary>
 
-The first run initializes the profile and Windows antivirus software may scan the full portable package. Later launches are usually faster.
+The first run initializes the profile and Windows antivirus software may scan the full portable package. The startup page shows five observed milestones, elapsed time, and the exact number of prepared profile components when that total is available from the package manifest. The bar advances only when work is observed as complete, so it may pause during security scanning instead of displaying a misleading time estimate. Later launches are usually faster.
 
 </details>
 

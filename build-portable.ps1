@@ -194,6 +194,7 @@ $stagingShell = Join-Path $staging 'app'
 New-Item -ItemType Directory -Force -Path $stagingShell | Out-Null
 Copy-Item (Join-Path $psRoot 'shell\package.json') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\main.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\startup-progress.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\update.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagingShell -ErrorAction Stop
 
@@ -235,6 +236,7 @@ $manifest = [ordered]@{
   nodeVersion = $NodeVersion
   electronVersion = $ElectronVersion
   updateFeed = 'https://github.com/maiziman/deepseek-harness-portable/releases'
+  startupProfileLinkCount = $null
   builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   runtimeSource = if ((Test-Path (Join-Path $runtimeSrc 'node.exe')) -and -not $ForceDownloadNode) { 'local-reuse' } else { 'https://nodejs.org/dist/' }
   nodeExeSha256 = (Get-FileHash (Join-Path $pkg 'runtime\node.exe') -Algorithm SHA256).Hash.ToLower()
@@ -246,10 +248,16 @@ $manifest | ConvertTo-Json | Set-Content (Join-Path $pkg 'manifest.json')
 if (-not $SkipSmoke) {
   Write-Output '=== smoke: launching DeepSeek-Harness.exe ==='
   $smokeOut = Join-Path $build 'smoke.png'
-  $envOld = @{ DSH_SMOKE = $env:DSH_SMOKE; DSH_SMOKE_OUT = $env:DSH_SMOKE_OUT }
+  $startupSmokeOut = Join-Path $build 'startup-progress.png'
+  $envOld = @{
+    DSH_SMOKE = $env:DSH_SMOKE
+    DSH_SMOKE_OUT = $env:DSH_SMOKE_OUT
+    DSH_SMOKE_PROGRESS_OUT = $env:DSH_SMOKE_PROGRESS_OUT
+  }
   try {
     $env:DSH_SMOKE = '1'
     $env:DSH_SMOKE_OUT = $smokeOut
+    $env:DSH_SMOKE_PROGRESS_OUT = $startupSmokeOut
     $proc = Start-Process -FilePath (Join-Path $pkg 'DeepSeek-Harness.exe') -WorkingDirectory $pkg -PassThru
     if (-not $proc.WaitForExit(150000)) {
       Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
@@ -259,11 +267,29 @@ if (-not $SkipSmoke) {
       throw "smoke test failed (exit $($proc.ExitCode)); see $pkg\dsh-home\logs\server.log"
     }
     if (-not (Test-Path $smokeOut)) { throw 'smoke test passed but no screenshot was written' }
-    Write-Output "smoke OK: $smokeOut ($((Get-Item $smokeOut).Length) bytes)"
+    if (-not (Test-Path $startupSmokeOut)) { throw 'smoke test passed but no startup progress screenshot was written' }
+    Write-Output "smoke OK: UI $((Get-Item $smokeOut).Length) bytes; startup $((Get-Item $startupSmokeOut).Length) bytes"
   } finally {
     $env:DSH_SMOKE = $envOld.DSH_SMOKE
     $env:DSH_SMOKE_OUT = $envOld.DSH_SMOKE_OUT
+    $env:DSH_SMOKE_PROGRESS_OUT = $envOld.DSH_SMOKE_PROGRESS_OUT
   }
+
+  $profileModules = Join-Path $pkg 'dsh-home\profiles\node_modules'
+  $profileLinkCount = 0
+  foreach ($entry in @(Get-ChildItem $profileModules -Force)) {
+    if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      $profileLinkCount++
+    } elseif ($entry.PSIsContainer -and $entry.Name.StartsWith('@')) {
+      foreach ($child in @(Get-ChildItem $entry.FullName -Force)) {
+        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $profileLinkCount++ }
+      }
+    }
+  }
+  if ($profileLinkCount -le 0) { throw 'smoke test initialized no profile component links' }
+  $manifest['startupProfileLinkCount'] = $profileLinkCount
+  $manifest | ConvertTo-Json | Set-Content (Join-Path $pkg 'manifest.json')
+  Write-Output "startup progress metadata: $profileLinkCount profile component links"
 } else {
   Write-Output '=== smoke skipped ==='
 }

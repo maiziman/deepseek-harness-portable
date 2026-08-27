@@ -5,8 +5,8 @@
 # What it verifies (the same checks a real user's first run performs):
 #   1. the ZIP extracts to a complete tree (exe, manifest, runtime, app)
 #   2. the bundled node.exe is the manifest version
-#   3. the packaged app boots: server starts, URL announced, UI renders,
-#      screenshot captured, exit code 0
+#   3. the packaged app boots: startup progress and final UI render,
+#      the server announces its URL, and the process exits 0
 #   4. first-run profile auto-initialization happens
 #
 # Usage:
@@ -21,6 +21,20 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+
+function Get-ProfileLinkCount([string]$ModulesDir) {
+  $count = 0
+  foreach ($entry in @(Get-ChildItem $ModulesDir -Force)) {
+    if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+      $count++
+    } elseif ($entry.PSIsContainer -and $entry.Name.StartsWith('@')) {
+      foreach ($child in @(Get-ChildItem $entry.FullName -Force)) {
+        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $count++ }
+      }
+    }
+  }
+  return $count
+}
 
 if (-not $ZipPath) {
   $candidates = Get-ChildItem (Join-Path $root 'dist\*.zip') -ErrorAction SilentlyContinue |
@@ -52,6 +66,7 @@ $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
 $nodeVer = & (Join-Path $pkgRoot 'runtime\node.exe') --version
 if ($nodeVer.Trim() -ne $manifest.nodeVersion) { throw "node version mismatch: $($nodeVer.Trim()) != $($manifest.nodeVersion)" }
 if ($manifest.updateFeed -ne 'https://github.com/maiziman/deepseek-harness-portable/releases') { throw "unexpected update feed: $($manifest.updateFeed)" }
+if ($manifest.startupProfileLinkCount -le 0) { throw 'manifest has no startup profile component total' }
 $readme = Get-Content (Join-Path $pkgRoot 'README.txt') -Raw
 $versionLine = "版本：dsh $($manifest.dshVersion) / Node $($manifest.nodeVersion) / Electron $($manifest.electronVersion)"
 if (-not $readme.Contains($versionLine)) { throw 'README.txt does not report the manifest component versions' }
@@ -59,14 +74,17 @@ Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2}' -f $manifes
 
 # ── 3. smoke: boot the app, capture the UI ───────────────────────────────────
 $smoke = Join-Path $WorkDir 'smoke.png'
+$startupSmoke = Join-Path $WorkDir 'startup-progress.png'
 $saved = @{
   DSH_SMOKE = $env:DSH_SMOKE
   DSH_SMOKE_OUT = $env:DSH_SMOKE_OUT
+  DSH_SMOKE_PROGRESS_OUT = $env:DSH_SMOKE_PROGRESS_OUT
   DSH_SMOKE_DELAY_MS = $env:DSH_SMOKE_DELAY_MS
 }
 try {
   $env:DSH_SMOKE = '1'
   $env:DSH_SMOKE_OUT = $smoke
+  $env:DSH_SMOKE_PROGRESS_OUT = $startupSmoke
   $env:DSH_SMOKE_DELAY_MS = '4000'
   $proc = Start-Process -FilePath $exe -WorkingDirectory $pkgRoot -PassThru
   if (-not $proc.WaitForExit(150000)) {
@@ -76,10 +94,13 @@ try {
   if ($proc.ExitCode -ne 0) { throw "smoke exited $($proc.ExitCode); see $pkgRoot\dsh-home\logs\server.log" }
   $img = Get-Item $smoke
   if ($img.Length -lt 10240) { throw "screenshot suspiciously small: $($img.Length) bytes" }
-  Write-Output ('[3/4] smoke OK: exit 0, UI screenshot {0} KB' -f [math]::Round($img.Length / 1KB))
+  $startupImg = Get-Item $startupSmoke
+  if ($startupImg.Length -lt 10240) { throw "startup screenshot suspiciously small: $($startupImg.Length) bytes" }
+  Write-Output ('[3/4] smoke OK: exit 0, startup {0} KB, UI {1} KB' -f [math]::Round($startupImg.Length / 1KB), [math]::Round($img.Length / 1KB))
 } finally {
   $env:DSH_SMOKE = $saved.DSH_SMOKE
   $env:DSH_SMOKE_OUT = $saved.DSH_SMOKE_OUT
+  $env:DSH_SMOKE_PROGRESS_OUT = $saved.DSH_SMOKE_PROGRESS_OUT
   $env:DSH_SMOKE_DELAY_MS = $saved.DSH_SMOKE_DELAY_MS
 }
 
@@ -87,8 +108,13 @@ try {
 $log = Get-Content (Join-Path $pkgRoot 'dsh-home\logs\server.log') -Raw
 if ($log -notmatch 'dsh web: http://') { throw 'server never announced its URL' }
 if (-not (Test-Path (Join-Path $pkgRoot 'dsh-home\profiles\web'))) { throw 'web profile was not initialized' }
-if (-not (Test-Path (Join-Path $pkgRoot 'dsh-home\profiles\node_modules\@deepseek-ai\dsh'))) { throw 'installation fallback not prepared' }
-Write-Output '[4/4] first-run OK: server URL announced, web profile initialized'
+$profileModules = Join-Path $pkgRoot 'dsh-home\profiles\node_modules'
+if (-not (Test-Path (Join-Path $profileModules '@deepseek-ai\dsh'))) { throw 'installation fallback not prepared' }
+$actualProfileLinks = Get-ProfileLinkCount $profileModules
+if ($actualProfileLinks -ne $manifest.startupProfileLinkCount) {
+  throw "startup component total mismatch: $actualProfileLinks != $($manifest.startupProfileLinkCount)"
+}
+Write-Output "[4/4] first-run OK: server URL announced, web profile initialized, $actualProfileLinks component links"
 
 Write-Output '=== VERIFY PASSED ==='
 if (-not $Keep) { Remove-Item -Recurse -Force $WorkDir }

@@ -39,7 +39,7 @@ build-portable.ps1
  └─ create the ZIP and SHA256SUMS.txt
 ```
 
-The desktop shell starts the bundled Node.js executable with `dsh web --no-open --port 0`. It reads the announced loopback URL, loads it in the desktop window, focuses the existing window on a second launch, and stops the server process tree when the window closes.
+The desktop shell renders its startup page before spawning the bundled Node.js executable with `dsh web --no-open --port 0`. The page reports observed directory, runtime, profile-component, profile, server, and interface milestones plus elapsed time; during first-run fallback creation, it counts completed component links against the total recorded by the build smoke test in `manifest.json`. The shell reads the announced loopback URL, loads it in the desktop window, focuses the existing window on a second launch, and stops the server process tree when the window closes.
 
 ## Automatic upstream tracking
 
@@ -56,7 +56,7 @@ The packaged desktop app reads only published Releases. At most once every 24 ho
 .\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v0.1.1-rc.2.zip
 ```
 
-The verification probe checks extraction completeness, manifest and runtime versions, a real server boot, URL discovery, UI rendering, clean shutdown, and first-run profile initialization.
+The verification probe checks extraction completeness, manifest and runtime versions, rendered startup-progress and final-UI screenshots, a real server boot, URL discovery, clean shutdown, and first-run profile initialization. It also requires the initialized component-link count to match the package manifest.
 
 GitHub Actions repeats the build and probe on fresh Windows Server 2022 and 2025 runners. Pushes upload short-lived workflow artifacts; a `v*` tag publishes the ZIP and checksum to a GitHub Release, while upstream tracking publishes a verified Release when a new official dsh version appears.
 

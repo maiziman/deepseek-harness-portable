@@ -126,10 +126,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test desktop update logic
+      - name: Test desktop shell logic
         shell: pwsh
         run: |
-          node --test .\shell\update.test.js
+          node --test .\shell\startup-progress.test.js .\shell\update.test.js
 
       - name: Build upstream portable package
         shell: pwsh
@@ -150,6 +150,16 @@ jobs:
           path: |
             dist/*.zip
             dist/SHA256SUMS.txt
+          retention-days: 14
+
+      - name: Upload verification screenshots
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dsh-portable-ui-${{ matrix.os }}-${{ needs.detect.outputs.dsh_version }}
+          path: |
+            .build/startup-progress.png
+            .build/smoke.png
+          include-hidden-files: true
           retention-days: 14
 
   publish-release:
