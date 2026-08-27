@@ -8,6 +8,8 @@ DeepSeek-Harness.zip  → 解压 → 双击 DeepSeek-Harness.exe → 独立桌�
 
 English summary is at the bottom.
 
+![DeepSeek Harness portable desktop — 首次启动](docs/screenshot.png)
+
 ## 特性
 
 - **独立桌面窗口**：Electron 内嵌 dsh Web UI（自带 Chromium，不依赖系统 WebView2）；双击秒开“正在启动…”窗口，界面就绪自动跳转
