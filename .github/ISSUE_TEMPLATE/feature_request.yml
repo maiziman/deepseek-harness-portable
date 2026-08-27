@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an improvement to the portable packaging or desktop shell.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: Product features inside DeepSeek Harness belong in the upstream repository. Use this form for packaging, startup, portability, and Windows integration.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What portable-build or Windows workflow is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement
+      description: Describe the result you want, including any compatibility or package-size tradeoffs.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional workarounds or related tools you have tried.
