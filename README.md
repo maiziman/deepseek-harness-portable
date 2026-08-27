@@ -7,7 +7,7 @@
 <p align="center"><strong>Run DeepSeek Harness on Windows from one ZIP — no Node.js, installer, or administrator access required.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/maiziman/deepseek-harness-portable/releases/latest"><strong>Download the latest release</strong></a>
+  <a href="https://github.com/maiziman/deepseek-harness-portable/releases"><strong>Download releases, including previews</strong></a>
   · <a href="README.zh.md">中文说明</a>
   · <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
 </p>
@@ -25,7 +25,7 @@
 
 ## Get started in three steps
 
-1. Download `DeepSeek-Harness-win64-v<version>.zip` from the [latest release](https://github.com/maiziman/deepseek-harness-portable/releases/latest) (about 255 MiB).
+1. Download `DeepSeek-Harness-win64-v<version>.zip` from the [Releases page](https://github.com/maiziman/deepseek-harness-portable/releases), including preview versions when available (about 255 MiB).
 2. Extract the ZIP to a short path such as `C:\Tools\DeepSeek-Harness`.
 3. Double-click `DeepSeek-Harness.exe`, accept the preview notice, add a DeepSeek API key when prompted, choose a workspace, and start a session.
 
@@ -44,7 +44,7 @@ No API key is bundled. Windows SmartScreen may show an unrecognized-app warning 
 | **Portable by design** | Settings, sessions, plugins, and logs stay under `dsh-home` beside the app. Move or back up the folder as one unit. |
 | **Verifiable releases** | Node.js downloads are checked against official SHA256 files; each package records exact component versions and ships with Release checksums. |
 | **Clean-machine tested** | Every push builds and boots on fresh Windows Server 2022 and 2025 GitHub runners before artifacts are published. |
-| **Automatic upstream releases** | Official dsh versions are checked every six hours and published automatically only after both Windows build-and-verify jobs pass. |
+| **Automatic upstream releases** | Official dsh versions are checked every six hours and published automatically only after both Windows jobs and the staged Release assets pass verification. |
 | **Update aware** | The desktop app checks published GitHub Releases at most once a day and prompts before opening the verified download page. It never replaces files silently. |
 
 ### Portable ZIP or the official npm install?

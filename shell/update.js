@@ -10,21 +10,21 @@ const RELEASE_PATH_PREFIX = '/maiziman/deepseek-harness-portable/releases/'
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 10000
 const MAX_RESPONSE_BYTES = 1024 * 1024
-const VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/u
+const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
 const ASSET_PATTERN = /^DeepSeek-Harness-win64-v(.+)\.zip$/u
 
 /**
  * Parse a supported Semantic Version for deterministic comparison.
  *
  * @param {string} value Version text.
- * @returns {{core: number[], prerelease: string[]} | null} Parsed version or null.
+ * @returns {{core: string[], prerelease: string[]} | null} Parsed version or null.
  */
 function parseVersion(value) {
   if (typeof value !== 'string') return null
   const match = VERSION_PATTERN.exec(value)
   if (match === null) return null
   return {
-    core: [Number(match[1]), Number(match[2]), Number(match[3])],
+    core: [match[1], match[2], match[3]],
     prerelease: match[4] === undefined ? [] : match[4].split('.'),
   }
 }
@@ -32,13 +32,14 @@ function parseVersion(value) {
 /**
  * Compare two valid parsed Semantic Versions.
  *
- * @param {{core: number[], prerelease: string[]}} left Left-hand version.
- * @param {{core: number[], prerelease: string[]}} right Right-hand version.
+ * @param {{core: string[], prerelease: string[]}} left Left-hand version.
+ * @param {{core: string[], prerelease: string[]}} right Right-hand version.
  * @returns {number} Negative, zero, or positive comparison result.
  */
 function compareParsedVersions(left, right) {
   for (let index = 0; index < left.core.length; index += 1) {
-    if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index]
+    const comparison = compareNumericIdentifiers(left.core[index], right.core[index])
+    if (comparison !== 0) return comparison
   }
   if (left.prerelease.length === 0 || right.prerelease.length === 0) {
     if (left.prerelease.length === right.prerelease.length) return 0
@@ -55,11 +56,24 @@ function compareParsedVersions(left, right) {
     if (leftPart === rightPart) continue
     const leftNumeric = /^\d+$/u.test(leftPart)
     const rightNumeric = /^\d+$/u.test(rightPart)
-    if (leftNumeric && rightNumeric) return Number(leftPart) - Number(rightPart)
+    if (leftNumeric && rightNumeric) return compareNumericIdentifiers(leftPart, rightPart)
     if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1
-    return leftPart.localeCompare(rightPart, 'en')
+    return leftPart < rightPart ? -1 : 1
   }
   return 0
+}
+
+/**
+ * Compare normalized numeric identifiers without losing integer precision.
+ *
+ * @param {string} left Left numeric identifier.
+ * @param {string} right Right numeric identifier.
+ * @returns {number} Negative, zero, or positive comparison result.
+ */
+function compareNumericIdentifiers(left, right) {
+  if (left.length !== right.length) return left.length - right.length
+  if (left === right) return 0
+  return left < right ? -1 : 1
 }
 
 /**
@@ -101,17 +115,21 @@ function isTrustedReleaseUrl(value) {
 function releaseMetadata(release) {
   if (release === null || typeof release !== 'object' || release.draft === true) return null
   if (!isTrustedReleaseUrl(release.html_url) || !Array.isArray(release.assets)) return null
-  for (const asset of release.assets) {
-    if (asset === null || typeof asset !== 'object' || typeof asset.name !== 'string') continue
-    const match = ASSET_PATTERN.exec(asset.name)
-    if (match === null || parseVersion(match[1]) === null) continue
-    return {
-      version: match[1],
-      releaseUrl: release.html_url,
-      releaseName: typeof release.name === 'string' && release.name.trim() !== '' ? release.name.trim() : match[1],
-    }
+  const checksums = release.assets.filter((asset) => asset !== null && typeof asset === 'object' && asset.name === 'SHA256SUMS.txt')
+  const portableAssets = release.assets.filter((asset) => (
+    asset !== null
+    && typeof asset === 'object'
+    && typeof asset.name === 'string'
+    && ASSET_PATTERN.test(asset.name)
+  ))
+  if (checksums.length !== 1 || portableAssets.length !== 1) return null
+  const match = ASSET_PATTERN.exec(portableAssets[0].name)
+  if (match === null || parseVersion(match[1]) === null) return null
+  return {
+    version: match[1],
+    releaseUrl: release.html_url,
+    releaseName: typeof release.name === 'string' && release.name.trim() !== '' ? release.name.trim() : match[1],
   }
-  return null
 }
 
 /**

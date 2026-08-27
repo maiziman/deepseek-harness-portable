@@ -45,7 +45,7 @@ build-portable.ps1
 
 `dsh-upstream-watch` 工作流每六小时运行一次，也支持手动启动。它读取官方 npm 的 `latest` 标签，再检查公开和草稿 Release 中是否已有对应的便携 ZIP。未打包的版本会进入 Windows Server 2022 与 2025 构建验证矩阵。
 
-两个环境全部通过后，工作流会自动公开标签为 `dsh-v<版本>` 的 Release，其中包含 Windows 2025 构建的 ZIP、`SHA256SUMS.txt` 和机器可读的 dsh 版本标记。任一构建失败或取消都会阻止发布。
+两个环境全部通过后，工作流会暂存一个私有的 `dsh-v<版本>` Draft Release，定时任务随后再次确认该版本仍是官方 npm 的 `latest`。最终发布步骤只处理这一个 Draft ID，并要求远端只有一个 ZIP 与 `SHA256SUMS.txt`，且上传状态、大小和远端 SHA256 摘要都与已验证的本地文件一致。预检会阻止重跑任务修改现有的公开 Release。任何失败都会让草稿保持私有以便后续重试；构建任务只有仓库只读权限，也不会保留 Git 凭据。
 
 便携程序只读取已经公开的 Release。它每 24 小时最多检查一次，把最高的有效便携包版本与 `manifest.json` 比较；发现新版时先询问是否打开下载页，不会自动下载或替换文件。如需禁用联网检查，可在启动前设置 `DSH_UPDATE_CHECK=0`。
 

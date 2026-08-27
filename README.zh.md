@@ -7,7 +7,7 @@
 <p align="center"><strong>一个 ZIP 即可在 Windows 运行 DeepSeek Harness——无需 Node.js、安装程序或管理员权限。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/maiziman/deepseek-harness-portable/releases/latest"><strong>下载最新版本</strong></a>
+  <a href="https://github.com/maiziman/deepseek-harness-portable/releases"><strong>下载版本（包含预览版）</strong></a>
   · <a href="README.md">English</a>
   · <a href="https://github.com/deepseek-ai/deepseek-harness">DeepSeek Harness</a>
 </p>
@@ -25,7 +25,7 @@
 
 ## 三步开始使用
 
-1. 从[最新 Release](https://github.com/maiziman/deepseek-harness-portable/releases/latest) 下载 `DeepSeek-Harness-win64-v<版本>.zip`（约 255 MiB）。
+1. 从 [Releases 页面](https://github.com/maiziman/deepseek-harness-portable/releases) 下载 `DeepSeek-Harness-win64-v<版本>.zip`，有预览版时也会列在这里（约 255 MiB）。
 2. 解压到较短的路径，例如 `C:\Tools\DeepSeek-Harness`。
 3. 双击 `DeepSeek-Harness.exe`，确认预览版声明，按提示填写 DeepSeek API Key，选择工作区并新建会话。
 
@@ -44,7 +44,7 @@
 | **真正便携** | 设置、会话、插件和日志都在程序旁的 `dsh-home` 中；整个文件夹可一起移动和备份。 |
 | **发布可验证** | Node.js 下载会与官方 SHA256 文件核对；每个包记录精确组件版本，并随 Release 提供校验和。 |
 | **全新系统验证** | 每次推送都在全新的 Windows Server 2022 和 2025 GitHub runner 上完成构建与真实启动。 |
-| **自动跟进官方版本** | 每六小时检查一次官方 dsh 版本；只有两个 Windows 构建验证任务都通过，才会自动公开 Release。 |
+| **自动跟进官方版本** | 每六小时检查一次官方 dsh 版本；只有两个 Windows 任务和暂存的 Release 附件都通过验证，才会自动公开。 |
 | **主动提示更新** | 桌面程序每天最多检查一次已公开的 GitHub Release，发现新版后先询问，再打开经过验证的下载页面；不会静默替换文件。 |
 
 ### 便携 ZIP 还是官方 npm 安装？

@@ -4,19 +4,17 @@
 # run doubles as a clean-environment compatibility check. `fail-fast: false`
 # reports every OS even when one fails.
 #
-# Jobs: build the Windows x64 package, run the verification probe, upload the
-# ZIP + checksum + screenshot as artifacts; on tags v*, also attach the ZIP to
-# a GitHub Release.
+# Jobs: build the Windows x64 package, run the verification probe, and upload
+# the ZIP and checksum as artifacts. A separate write-scoped job stages and
+# validates tag releases before publishing them.
 name: dsh-portable-verify
 
 on:
   push:
   workflow_dispatch:
 
-# Explicit write scope: new repositories default GITHUB_TOKEN to read-only,
-# which breaks the release creation step below.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-and-verify:
@@ -28,7 +26,9 @@ jobs:
           - os: windows-2025
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Test desktop update logic
         shell: pwsh
@@ -46,7 +46,7 @@ jobs:
           .\verify-package.ps1
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dsh-portable-${{ matrix.os }}
           path: |
@@ -54,15 +54,75 @@ jobs:
             dist/SHA256SUMS.txt
           retention-days: 14
 
-      - name: Create GitHub Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.os == 'windows-2025'
-        uses: softprops/action-gh-release@v2
+  publish-tag-release:
+    needs: build-and-verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: dsh-tag-release-${{ github.ref }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download the Windows 2025 verified package
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dsh-portable-windows-2025
+          path: release-assets
+
+      - name: Resolve release asset name
+        id: asset
+        shell: pwsh
+        run: |
+          $zips = @(Get-ChildItem release-assets -File -Filter 'DeepSeek-Harness-*.zip')
+          if ($zips.Count -ne 1) { throw "expected one release ZIP, found $($zips.Count)" }
+          "zip_name=$($zips[0].Name)" >> $env:GITHUB_OUTPUT
+
+      - name: Check whether the Release is safe to stage
+        id: preflight
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          ZIP_NAME: ${{ steps.asset.outputs.zip_name }}
+        run: |
+          ./.github/scripts/finalize-release.ps1 `
+            -Repository $env:REPOSITORY `
+            -Tag $env:RELEASE_TAG `
+            -ZipName $env:ZIP_NAME `
+            -Preflight
+
+      - name: Stage verified Draft Release
+        id: stage
+        if: steps.preflight.outputs.should_stage == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           files: |
-            dist/DeepSeek-Harness-*.zip
-            dist/SHA256SUMS.txt
-          draft: false
+            release-assets/DeepSeek-Harness-*.zip
+            release-assets/SHA256SUMS.txt
+          draft: true
           generate_release_notes: true
+
+      - name: Validate assets and publish Release
+        if: steps.preflight.outputs.should_stage == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          ZIP_NAME: ${{ steps.asset.outputs.zip_name }}
+          RELEASE_ID: ${{ steps.stage.outputs.id }}
+        run: |
+          ./.github/scripts/finalize-release.ps1 `
+            -Repository $env:REPOSITORY `
+            -Tag $env:RELEASE_TAG `
+            -ZipName $env:ZIP_NAME `
+            -ReleaseId $env:RELEASE_ID
 
   # Lightweight cross-OS sanity was considered here; it requires multi-platform
   # packaging (Node runtime + Electron for darwin/linux) in build-portable.ps1.

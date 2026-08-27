@@ -45,7 +45,7 @@ The desktop shell starts the bundled Node.js executable with `dsh web --no-open 
 
 The `dsh-upstream-watch` workflow runs every six hours and can also be started manually. It reads the official npm `latest` tag, then checks public and Draft Releases for a matching portable ZIP. A version without a package enters the Windows Server 2022 and 2025 build-and-verify matrix.
 
-After both runners pass, the workflow publishes a Release tagged `dsh-v<version>`. The Release includes the Windows 2025 ZIP, `SHA256SUMS.txt`, and a machine-readable dsh version marker. A failed or cancelled build prevents publication.
+After both runners pass, the workflow stages a private Draft Release tagged `dsh-v<version>`, then scheduled runs confirm that the version is still the official npm `latest`. The final publication step addresses that exact Draft ID and requires exactly one matching ZIP and `SHA256SUMS.txt` whose uploaded states, sizes, and remote SHA256 digests match the verified local files. A preflight check prevents a rerun from modifying an existing public Release. Any failure leaves the draft private for a later retry; build jobs have read-only repository access and do not retain Git credentials.
 
 The packaged desktop app reads only published Releases. At most once every 24 hours it compares the highest valid portable asset version with `manifest.json`. A newer version produces an opt-in download prompt; the app does not download or replace files. Set `DSH_UPDATE_CHECK=0` before launch to disable the network check.
 

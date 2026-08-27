@@ -18,17 +18,26 @@ function release(version, options = {}) {
     draft: options.draft === true,
     html_url: options.url || `https://github.com/maiziman/deepseek-harness-portable/releases/tag/dsh-v${version}`,
     name: options.name || `DeepSeek Harness Portable ${version}`,
-    assets: [{ name: `DeepSeek-Harness-win64-v${version}.zip` }],
+    assets: [
+      { name: `DeepSeek-Harness-win64-v${version}.zip` },
+      { name: 'SHA256SUMS.txt' },
+    ],
   }
 }
 
 test('version parsing and ordering follow Semantic Version precedence', () => {
-  assert.deepEqual(parseVersion('0.1.1-rc.2'), { core: [0, 1, 1], prerelease: ['rc', '2'] })
+  assert.deepEqual(parseVersion('0.1.1-rc.2+build.7'), { core: ['0', '1', '1'], prerelease: ['rc', '2'] })
   assert.equal(parseVersion('v0.1.1'), null)
+  assert.equal(parseVersion('01.1.1'), null)
+  assert.equal(parseVersion('1.0.0-alpha..1'), null)
+  assert.equal(parseVersion('1.0.0-rc.01'), null)
   assert.equal(isNewerVersion('0.1.1-rc.3', '0.1.1-rc.2'), true)
   assert.equal(isNewerVersion('0.1.1', '0.1.1-rc.9'), true)
   assert.equal(isNewerVersion('0.2.0-rc.1', '0.1.9'), true)
   assert.equal(isNewerVersion('0.1.1-rc.1', '0.1.1-rc.2'), false)
+  assert.equal(isNewerVersion('1.0.0-a', '1.0.0-A'), true)
+  assert.equal(isNewerVersion('100000000000000000000.0.0', '99999999999999999999.0.0'), true)
+  assert.equal(isNewerVersion('1.0.0+build.2', '1.0.0+build.1'), false)
 })
 
 test('release selection ignores drafts, foreign URLs, and malformed assets', () => {
@@ -36,6 +45,7 @@ test('release selection ignores drafts, foreign URLs, and malformed assets', () 
     release('0.2.0-rc.1', { draft: true }),
     release('0.1.9', { url: 'https://example.com/releases/0.1.9' }),
     { ...release('0.1.8'), assets: [{ name: 'source.zip' }] },
+    { ...release('0.1.7'), assets: [{ name: 'DeepSeek-Harness-win64-v0.1.7.zip' }] },
     release('0.1.1-rc.2'),
     release('0.1.1-rc.3'),
   ]

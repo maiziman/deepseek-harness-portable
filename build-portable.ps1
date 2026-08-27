@@ -108,7 +108,8 @@ if (-not $DshVersion) {
   $meta = Invoke-RestMethod -Uri 'https://registry.npmjs.org/@deepseek-ai/dsh'
   $DshVersion = [string]$meta.'dist-tags'.latest
 }
-if ($DshVersion -notmatch '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$') { throw "unexpected version format: $DshVersion" }
+$versionPattern = '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+if ($DshVersion -notmatch $versionPattern) { throw "unexpected version format: $DshVersion" }
 if ($NodeVersion -notmatch '^v?\d+\.\d+\.\d+$') { throw "unexpected Node version: $NodeVersion" }
 if (-not $NodeVersion.StartsWith('v')) { $NodeVersion = 'v' + $NodeVersion }
 
@@ -166,7 +167,7 @@ Copy-Item -Recurse -Force $scratchApp $app
 $dshBin = Join-Path $app 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 if (-not (Test-Path $dshBin)) { throw "dsh bin missing after install: $dshBin" }
 $dshPkg = Get-Content (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') | ConvertFrom-Json
-if ($dshPkg.version -ne $DshVersion) { throw "installed dsh version $($dshPkg.version) != $DshVersion" }
+if ($dshPkg.version -cne $DshVersion) { throw "installed dsh version $($dshPkg.version) != $DshVersion" }
 
 # ── 4. Electron tools (build-only) ───────────────────────────────────────────
 Write-Output '=== installing electron 44.0.0 + @electron/packager (build-only, pnpm) ==='
