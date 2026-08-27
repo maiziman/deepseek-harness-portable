@@ -1,88 +1,138 @@
-# DeepSeek Harness Portable（dsh 便携桌面版构建工具）
+# DeepSeek Harness Portable
 
-把 DeepSeek Harness 的最新 npm 发行版，一键打包成**免安装、跨机器可用的 Windows 桌面程序 ZIP**。
+> Ship DeepSeek Harness as a portable, zero-install Windows desktop app — one ZIP, double-click, done.
+
+**English** | [中文](README.zh.md)
+
+[![verify](https://img.shields.io/github/actions/workflow/status/maiziman/deepseek-harness-portable/portable-verify.yml?branch=main&label=verify%20matrix)](https://github.com/maiziman/deepseek-harness-portable/actions)
+[![release](https://img.shields.io/github/v/release/maiziman/deepseek-harness-portable?include_prereleases)](https://github.com/maiziman/deepseek-harness-portable/releases)
+[![license](https://img.shields.io/github/license/maiziman/deepseek-harness-portable)](LICENSE)
+[![platform](https://img.shields.io/badge/platform-Windows%20x64-0078d4)](#compatibility)
+[![downloads](https://img.shields.io/github/downloads/maiziman/deepseek-harness-portable/total)](https://github.com/maiziman/deepseek-harness-portable/releases)
+
+<details>
+<summary><b>Why does this exist?</b></summary>
+
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh`) is distributed through npm: the
+official path requires Node.js 22.19+ on the target machine. If you want to hand the product to a
+non-technical user — or run it on a machine where installing a Node toolchain is not an option —
+this project builds **one self-contained ZIP** from the latest published `@deepseek-ai/dsh`:
+
+- a bundled official Node.js runtime, so no Node is needed on the target PC
+- a native desktop window (Electron-embedded UI), so double-clicking opens an **app**, not a browser tab
+- all data inside the package, so the whole folder can be copied to a USB stick and moved between machines
+
+</details>
+
+## Quick start
+
+1. Download `DeepSeek-Harness-win64-v<version>.zip` from the [latest release](https://github.com/maiziman/deepseek-harness-portable/releases)
+2. Extract it (a short path like `C:\Tools\` works best)
+3. Double-click `DeepSeek-Harness.exe` → a window opens instantly → accept the notice → add a DeepSeek API key in **Settings → Models** → pick a workspace and start chatting
+
+![DeepSeek Harness Portable — first run](docs/screenshot.png)
+
+## Features
+
+| | |
+|---|---|
+| 🖥️ **Native desktop app** | Electron-embedded dsh UI (bundled Chromium, no system WebView2 dependency); the window appears instantly, then loads the real UI |
+| 📦 **Zero environment** | Official Node.js runtime + all production dependencies (~458 packages incl. native `koffi` / `node-pty`) are inside the ZIP; no Node, npm, admin rights, or registry writes |
+| 🧳 **Truly portable** | `dsh-home` keeps settings, sessions and plugins in-package; copy the folder anywhere, uninstall = delete it |
+| 🔒 **Reproducible builds** | Pinned versions (dsh / Node / Electron), official SHA256 verification for Node, pnpm-locked dependencies, deterministic tree |
+| 🧪 **Verification gate** | In-package smoke probe + GitHub Actions matrix (Windows Server 2022/2025 fresh runners) on every push; tags auto-publish Releases |
+
+## How it works
 
 ```
-DeepSeek-Harness.zip  → 解压 → 双击 DeepSeek-Harness.exe → 独立桌面窗口（非浏览器）
+build-portable.ps1
+ ├─ 1. resolve versions (dsh = npm latest, Node pinned, Electron pinned)
+ ├─ 2. Node runtime: official win-x64, SHA256-verified
+ ├─ 3. pnpm production install (hoisted flat node_modules — no symlinks, ZIP-safe)
+ ├─ 4. Electron shell: packager → DeepSeek-Harness.exe
+ ├─ 5. assemble tree (runtime/ + app/ + dsh-home/ + README.txt + dsh.cmd)
+ ├─ 6. smoke: boot the app headless, assert server URL + UI screenshot, exit 0
+ └─ 7. zip + SHA256SUMS.txt        ← DeepSeek-Harness-win64-v<dsh>.zip
 ```
 
-English summary is at the bottom.
+The desktop shell (`shell/main.js`) spawns `runtime\node.exe` running
+`dsh web --no-open --port 0` (a free port is picked automatically), learns the URL from
+the server's readiness line, and serves it in the window. Single-instance locking focuses
+the existing window on a second launch; closing the window stops the whole server tree.
 
-![DeepSeek Harness portable desktop — 首次启动](docs/screenshot.png)
-
-## 特性
-
-- **独立桌面窗口**：Electron 内嵌 dsh Web UI（自带 Chromium，不依赖系统 WebView2）；双击秒开“正在启动…”窗口，界面就绪自动跳转
-- **零环境要求**：内置官方 Node.js 运行时 + dsh 生产依赖（458 包，含 koffi/node-pty 原生模块）；目标机无需 Node/npm/管理员权限
-- **真便携**：配置、会话、插件全部保存在包内 `dsh-home`，整个文件夹可拷走/U 盘携带；卸载 = 删文件夹
-- **可复现构建**：版本钉死（dsh / Node / Electron 均可参数化），Node 官方 SHA256 校验，pnpm 锁定依赖，构建+冒烟+压缩全自动
-- **兼容性门禁**：内置冒烟探针 + GitHub Actions 矩阵（windows-2022 / windows-2025 全新 runner），打 tag 自动出 GitHub Release 附件
-
-## 构建
+## Build from source
 
 ```powershell
-# 前置：Windows 10+，PowerShell 7 或 Windows PowerShell 5.1，可访问 npm registry
+# Prerequisites: Windows 10+, PowerShell 7 or Windows PowerShell 5.1, access to npm registry
 .\build-portable.ps1
 ```
 
-常用参数：
-
-| 参数 | 说明 |
+| Parameter | Meaning |
 |---|---|
-| `-DshVersion 0.1.1-rc.2` | dsh 版本；省略则取 npm 最新版 |
-| `-NodeVersion v24.19.0` | 官方 Node 版本（需匹配 dsh engines `^22.19 \|\| >=24`） |
-| `-ElectronVersion 44.0.0` | Electron 版本 |
-| `-ElectronMirror npmmirror` | Electron 二进制源：`npmmirror`（国内默认）/ `github`（CI）/ 自定义镜像 URL |
-| `-SkipSmoke` | 跳过冒烟；`-ForceDownloadNode` 强制重新下载 Node 并校验 |
+| `-DshVersion 0.1.1-rc.2` | dsh version; defaults to the npm latest |
+| `-NodeVersion v24.19.0` | official Node version (must satisfy dsh engines `^22.19 \|\| >=24`) |
+| `-ElectronVersion 44.0.0` | Electron version |
+| `-ElectronMirror npmmirror` | Electron binary source: `npmmirror` (default, CN-friendly) / `github` (CI) / any mirror URL |
+| `-SkipSmoke` | skip the in-package smoke; `-ForceDownloadNode` re-downloads Node with checksum check |
 
-产物：`dist\DeepSeek-Harness-win64-v<dsh 版本>.zip` + `dist\SHA256SUMS.txt`，包内 `manifest.json` 记录全部版本与校验和。
+Output: `dist\DeepSeek-Harness-win64-v<sh>.zip` + `dist\SHA256SUMS.txt`; the package's `manifest.json`
+records every version and the SHA256 of key binaries.
 
-## 验证（兼容性探针）
+## Compatibility & verification
+
+`verify-package.ps1` is the single compatibility probe — deterministic pass/fail, runnable anywhere:
 
 ```powershell
-.\verify-package.ps1                 # 验证 dist\ 最新 ZIP（4 步：解压/版本/冒烟/首次启动自检）
-.\verify-package.ps1 -ZipPath x.zip  # 指定包
+.\verify-package.ps1                  # probes the newest dist\ ZIP
+.\verify-package.ps1 -ZipPath x.zip   # probe a specific package
 ```
 
-- **本机**：直接运行。Windows 10/11 专业版可用 Windows Sandbox 或 VM 做“全新系统”验证
-- **CI 矩阵**：`.github\workflows\portable-verify.yml`，push 与 tag 自动执行；打 `v*` tag 自动发布 Release 附件
-- **边界**：GitHub runner 是 Server 镜像；Win10/11 消费版最终背书：每版在 1-2 台真机或沙盒跑一次探针
+It asserts: extraction completeness → manifest/Node version match → real boot
+(server up, URL announced, UI rendered, screenshot captured, exit 0) → first-run
+profile auto-initialization.
 
-## 目录结构
+| Layer | Coverage | Cadence |
+|---|---|---|
+| In-build smoke | everything above, one machine | every build |
+| GitHub Actions matrix (`windows-2022` + `windows-2025`, fresh machines) | builds + probes + artifacts | every push & `v*` tag |
+| Real machines / Windows Sandbox | consumer Windows 10/11, AV, old hardware | one spot-check per release |
+
+> GitHub runners are Server images; for the consumer Win10/11 final word, run the probe on
+> one or two real machines (or Windows Sandbox) per release. Requirements: Windows 10 21H2+,
+> x64; no admin rights; in rare stripped systems install the VC++ 2022 x64 runtime if the app
+> refuses to start.
+
+## FAQ
+
+- **Windows SmartScreen warns on first launch?** → *More info → Run anyway.* The bundled
+  `node.exe` is the officially signed Node.js binary; package checksums are in `manifest.json` and the Release SHA256SUMS.
+- **Port already in use?** → the app picks a free port automatically; for a CLI run use `dsh.cmd web --port 8080`.
+- **Where is my data?** → `dsh-home` next to the exe. Back up or relocate by copying the folder.
+- **Can I use it from the command line?** → `dsh.cmd web`, `dsh.cmd --profile headless "task"`, etc.
+- **Why is the first startup slower?** → first run initializes the profile and the symlink fallback and is scanned by AV; later starts are seconds.
+
+## Project layout
 
 ```
-portable-desktop\
-├─ build-portable.ps1     主构建脚本（运行时准备/依赖安装/打包/组装/冒烟/压缩）
-├─ verify-package.ps1     兼容性探针（解压/版本/冒烟/首启自检）
-├─ watch-progress.ps1     开发辅助：每 20s 写一行构建进度
-├─ shell\                 Electron 壳源码
-│  ├─ main.js              桌面壳（秒开窗口/服务托管/单实例/退出清理/截图自检）
-│  ├─ package.json
-│  └─ make-icon.ps1        生成应用图标
-├─ workflow\              GitHub Actions 矩阵 workflow（复制用）
-├─ README.txt             打进 ZIP 的中文使用说明
-├─ dsh.cmd                打进 ZIP 的 CLI 入口
-├─ dist\                   构建产物（git 忽略，走 Release）
-└─ .build\ .cache\         中间产物（git 忽略）
+.
+├─ build-portable.ps1     main build (runtime/prepare/install/pack/assemble/smoke/zip)
+├─ verify-package.ps1     compatibility probe (extract/versions/smoke/first-run)
+├─ watch-progress.ps1     dev helper: one progress line every 20 s
+├─ shell/                 Electron shell sources (main.js, icon generator)
+├─ .github/workflows/     CI matrix + tag releases
+├─ docs/                  README screenshot
+└─ dist/ .build/ .cache/  generated (git-ignored; artifacts ship via Releases)
 ```
 
-## 许可与致谢
+## Contributing
 
-本项目 MIT（见 [LICENSE](LICENSE)），仅包含构建工具链，不含 DeepSeek Harness 源码。
+Issues and PRs are welcome. For a new release, bump the pinned defaults (or pass parameters),
+run `.\build-portable.ps1` locally, and let CI verify the matrix before tagging `v*`.
 
-打包产物由以下软件组装，版权归各自所有者：
+## License & attribution
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT，DeepSeek AI）
-- Node.js（MIT）
-- Electron（MIT）
-- 及 `app\node_modules` 内全部 npm 依赖（各自许可，随包分发，`manifest.json` 记录版本）
+This repository is **MIT** licensed ([LICENSE](LICENSE)). It ships build tooling only — it does not
+vendor DeepSeek Harness source. Built packages are assembled from:
 
----
-
-## English (brief)
-
-This repository builds DeepSeek Harness into a portable, zero-install Windows x64 desktop app ZIP:
-double-click `DeepSeek-Harness.exe` for a standalone window (Electron-embedded Web UI), bundled Node.js
-runtime and production dependencies; all data stays in-package. Build with `.\build-portable.ps1`
-(versions parametrizable), verify with `.\verify-package.ps1`, and let the GitHub Actions matrix
-(Server 2022 + 2025) gate every release on tags `v*`. MIT licensed.
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek AI)
+- Node.js (MIT) · Electron (MIT) · all npm dependencies in `app\node_modules` under their own licenses (versions recorded in `manifest.json`)
