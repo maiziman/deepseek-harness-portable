@@ -20,8 +20,8 @@
   <a href="https://github.com/maiziman/deepseek-harness-portable/releases"><img alt="Total downloads" src="https://img.shields.io/github/downloads/maiziman/deepseek-harness-portable/total"></a>
 </p>
 
-> [!NOTE]
-> This is a community-maintained packaging project. DeepSeek Harness is developed by DeepSeek AI and remains the source of the application itself.
+> [!IMPORTANT]
+> This is an independent community packaging project. It is not affiliated with, endorsed by, sponsored by, or an official release channel of DeepSeek. The name “DeepSeek Harness” and the whale logo identify the packaged upstream software; they are DeepSeek trademarks and brand assets.
 
 ## Get started in three steps
 
@@ -120,4 +120,4 @@ Problems in DeepSeek Harness itself belong in the [upstream issue tracker](https
 
 ## License and attribution
 
-The packaging tools in this repository are available under the [MIT License](LICENSE). Built ZIPs are assembled from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek AI), Node.js, Electron, and npm dependencies under their respective licenses. Exact versions are recorded in each package's `manifest.json`.
+The packaging tools in this repository are available under the [MIT License](LICENSE). Built ZIPs are assembled from [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (MIT, © DeepSeek AI), Node.js, Electron, and npm dependencies under their respective licenses. Exact versions are recorded in each package's `manifest.json`. The whale mark is reproduced from the upstream favicon only to identify the packaged upstream software; its inclusion does not imply DeepSeek endorsement or authorization. See [Third-party notices](THIRD_PARTY_NOTICES.md) for its source and license notice.

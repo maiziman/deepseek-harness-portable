@@ -3,7 +3,7 @@
 # GitHub Actions windows runners.
 #
 # What it verifies (the same checks a real user's first run performs):
-#   1. the ZIP extracts to a complete tree (exe, manifest, runtime, app)
+#   1. the ZIP extracts to a complete tree (exe, manifest, runtime, app, notices)
 #   2. the bundled node.exe is the manifest version
 #   3. the packaged app boots: startup progress and final UI render,
 #      the server announces its URL, and the process exits 0
@@ -70,6 +70,12 @@ if ($manifest.startupProfileLinkCount -le 0) { throw 'manifest has no startup pr
 $readme = Get-Content (Join-Path $pkgRoot 'README.txt') -Raw
 $versionLine = "版本：dsh $($manifest.dshVersion) / Node $($manifest.nodeVersion) / Electron $($manifest.electronVersion)"
 if (-not $readme.Contains($versionLine)) { throw 'README.txt does not report the manifest component versions' }
+$noticesPath = Join-Path $pkgRoot 'THIRD_PARTY_NOTICES.md'
+if (-not (Test-Path $noticesPath -PathType Leaf)) { throw 'THIRD_PARTY_NOTICES.md missing' }
+$notices = Get-Content $noticesPath -Raw
+if (-not $notices.Contains('Copyright (c) 2026 DeepSeek') -or -not $notices.Contains('apps/web/public/favicon.svg')) {
+  throw 'DeepSeek whale mark source or license notice missing'
+}
 Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2}' -f $manifest.dshVersion, $manifest.nodeVersion, $manifest.electronVersion)
 
 # ── 3. smoke: boot the app, capture the UI ───────────────────────────────────

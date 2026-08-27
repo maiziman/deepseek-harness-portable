@@ -31,10 +31,11 @@ The build writes `dist\DeepSeek-Harness-win64-v<dsh-version>.zip` and `dist\SHA2
 ```text
 build-portable.ps1
  ├─ resolve and validate component versions
+ ├─ validate the transparent icon master and generate nine Windows icon sizes
  ├─ download the official Windows x64 Node.js runtime and verify SHA256
  ├─ install production dependencies into a ZIP-safe, hoisted tree
- ├─ package the Electron desktop shell
- ├─ assemble runtime/, app/, dsh-home/, workspace/, README.txt, and dsh.cmd
+ ├─ package the Electron desktop shell and compare all embedded PE icon frames with the source ICO
+ ├─ assemble runtime/, app/, dsh-home/, workspace/, notices, README.txt, and dsh.cmd
  ├─ boot the packaged app, wait for the local server, and capture the rendered UI
  └─ create the ZIP and SHA256SUMS.txt
 ```
@@ -56,7 +57,7 @@ The packaged desktop app reads only published Releases. At most once every 24 ho
 .\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v0.1.1-rc.2.zip
 ```
 
-The verification probe checks extraction completeness, manifest and runtime versions, rendered startup-progress and final-UI screenshots, a real server boot, URL discovery, clean shutdown, and first-run profile initialization. It also requires the initialized component-link count to match the package manifest.
+The build rejects an icon master without transparent and opaque pixels, an ICO without exactly 16, 20, 24, 32, 40, 48, 64, 128, and 256 px RGBA PNG frames, or a packaged EXE whose PE icon group differs from any source frame. The verification probe then checks extraction completeness, the bundled third-party notice, manifest and runtime versions, rendered startup-progress and final-UI screenshots, a real server boot, URL discovery, clean shutdown, and first-run profile initialization. It also requires the initialized component-link count to match the package manifest.
 
 GitHub Actions repeats the build and probe on fresh Windows Server 2022 and 2025 runners. Pushes upload short-lived workflow artifacts; a `v*` tag publishes the ZIP and checksum to a GitHub Release, while upstream tracking publishes a verified Release when a new official dsh version appears.
 

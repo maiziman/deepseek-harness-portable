@@ -9,6 +9,8 @@
 const fs = require('node:fs')
 const path = require('node:path')
 
+const DEEPSEEK_MARK = `data:image/svg+xml;base64,${fs.readFileSync(path.join(__dirname, 'deepseek-mark.svg')).toString('base64')}`
+
 const TOTAL_STEPS = 5
 const STAGES = Object.freeze({
   window: { progress: 6, step: 1 },
@@ -35,7 +37,7 @@ const COPY = Object.freeze({
     interface: ['Loading the workspace interface', 'The startup display closes after the interface renders.'],
     ready: ['DeepSeek Harness is ready', 'Startup completed.'],
     steps: ['Prepare portable data', 'Check bundled components', 'Initialize local profile', 'Start local service', 'Load workspace interface'],
-    brand: 'DEEPSEEK HARNESS',
+    brand: 'DEEPSEEK HARNESS · COMMUNITY PORTABLE',
     badgeFirst: 'First launch',
     badgeRegular: 'Starting',
     elapsed: 'Elapsed',
@@ -55,7 +57,7 @@ const COPY = Object.freeze({
     interface: ['正在加载工作区界面', '界面渲染完成后，启动页会自动关闭。'],
     ready: ['DeepSeek Harness 已就绪', '启动完成。'],
     steps: ['准备便携数据', '检查内置组件', '初始化本地 profile', '启动本地服务', '加载工作区界面'],
-    brand: 'DEEPSEEK HARNESS',
+    brand: 'DEEPSEEK HARNESS · COMMUNITY PORTABLE',
     badgeFirst: '首次启动',
     badgeRegular: '正在启动',
     elapsed: '已等待',
@@ -169,7 +171,7 @@ function loadingPage(options) {
 <html lang="${lang}">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>${copy.brand}</title>
   <style>
@@ -177,7 +179,7 @@ function loadingPage(options) {
     *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;overflow:hidden;background:radial-gradient(circle at 76% 9%,rgba(53,99,255,.24),transparent 34%),radial-gradient(circle at 10% 100%,rgba(56,73,171,.19),transparent 38%),#080c18}
     body:before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px);background-size:48px 48px;mask-image:linear-gradient(to bottom,black,transparent 88%)}
     .shell{width:min(760px,calc(100vw - 72px));padding:46px 50px 40px;border:1px solid rgba(139,162,255,.18);border-radius:24px;background:linear-gradient(145deg,rgba(19,27,53,.96),rgba(10,15,31,.96));box-shadow:0 28px 90px rgba(0,0,0,.42),inset 0 1px rgba(255,255,255,.035)}
-    .brand{display:flex;align-items:center;gap:14px;margin-bottom:40px}.mark{display:grid;place-items:center;width:46px;height:46px;border-radius:14px;background:linear-gradient(145deg,#688bff,#3052c9);box-shadow:0 9px 28px rgba(48,82,201,.38);font-weight:750;font-size:13px;letter-spacing:.05em}.brand-text{font-size:13px;letter-spacing:.14em;color:#bdc9ee;font-weight:650}.badge{margin-left:auto;border:1px solid rgba(126,151,255,.25);border-radius:999px;padding:7px 11px;background:rgba(74,101,218,.12);font-size:12px;color:#cbd6ff}
+    .brand{display:flex;align-items:center;gap:14px;margin-bottom:40px}.mark{display:block;flex:0 0 auto;width:46px;height:46px;object-fit:contain;filter:drop-shadow(0 9px 18px rgba(72,107,254,.34))}.brand-text{font-size:13px;letter-spacing:.14em;color:#bdc9ee;font-weight:650}.badge{margin-left:auto;border:1px solid rgba(126,151,255,.25);border-radius:999px;padding:7px 11px;background:rgba(74,101,218,.12);font-size:12px;color:#cbd6ff}
     h1{font-size:28px;line-height:1.25;letter-spacing:-.02em;margin:0 0 10px}#detail{min-height:27px;margin:0;color:#aebbdc;font-size:15px;line-height:1.7}
     .meter-meta{display:flex;justify-content:space-between;margin:30px 0 10px;color:#8fa1ce;font-size:12px;font-variant-numeric:tabular-nums}.track{height:10px;border-radius:999px;background:#1b2543;overflow:hidden;box-shadow:inset 0 1px 3px rgba(0,0,0,.5)}#bar{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#4267e8,#75a0ff);box-shadow:0 0 24px rgba(91,130,255,.58);transition:width .48s cubic-bezier(.2,.75,.25,1)}
     .steps{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;list-style:none;padding:0;margin:28px 0 30px}.steps li{position:relative;padding-top:17px;color:#68779c;font-size:11px;line-height:1.35}.steps li:before{content:"";position:absolute;left:0;top:0;width:7px;height:7px;border-radius:50%;background:#34405f;box-shadow:0 0 0 4px rgba(52,64,95,.16)}.steps li.active{color:#e0e7ff}.steps li.active:before{background:#79a0ff;box-shadow:0 0 0 4px rgba(92,132,255,.18),0 0 17px rgba(92,132,255,.8)}.steps li.done{color:#93a5d0}.steps li.done:before{background:#5275e5}
@@ -186,7 +188,7 @@ function loadingPage(options) {
 </head>
 <body>
   <main class="shell">
-    <div class="brand"><div class="mark">DSH</div><div class="brand-text">${copy.brand}</div><div class="badge">${badge}</div></div>
+    <div class="brand"><img class="mark" src="${DEEPSEEK_MARK}" alt="" aria-hidden="true"><div class="brand-text">${copy.brand}</div><div class="badge">${badge}</div></div>
     <h1 id="status"></h1><p id="detail"></p>
     <div class="meter-meta"><span id="step"></span><span id="percent"></span></div>
     <div id="track" class="track" role="progressbar" aria-valuemin="0" aria-valuemax="100"><div id="bar"></div></div>

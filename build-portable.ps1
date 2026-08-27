@@ -133,6 +133,9 @@ if (Test-Path $build) { Remove-Item -Recurse -Force $build }
 if (Test-Path $scratch) { Remove-Item -Recurse -Force $scratch }
 New-Item -ItemType Directory -Force -Path $build, $dist, $tools | Out-Null
 
+Write-Output '=== desktop icon: generating Windows sizes ==='
+& (Join-Path $psRoot 'shell\make-icon.ps1')
+
 # ── 2. Node runtime ──────────────────────────────────────────────────────────
 $runtimeSrc = Join-Path $repoRoot ".runtime\node-$NodeVersion-win-x64"
 if ((Test-Path (Join-Path $runtimeSrc 'node.exe')) -and -not $ForceDownloadNode) {
@@ -195,8 +198,10 @@ New-Item -ItemType Directory -Force -Path $stagingShell | Out-Null
 Copy-Item (Join-Path $psRoot 'shell\package.json') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\main.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\startup-progress.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\deepseek-mark.svg') $stagingShell -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'shell\update.js') $stagingShell
-Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagingShell -ErrorAction Stop
+$stagedIcon = Join-Path $stagingShell 'icon.ico'
+Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagedIcon -ErrorAction Stop
 
 Write-Output '=== electron-packager ==='
 $packagerCli = @(
@@ -206,13 +211,22 @@ $packagerCli = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $packagerCli) { throw '@electron/packager bin not found under shell-tools' }
 & (Join-Path $build 'runtime\node.exe') $packagerCli $stagingShell 'DshDesktop' `
-  --platform=win32 --arch=x64 --out=$profile --overwrite `
-  --icon=(Join-Path $stagingShell 'icon.ico') `
-  --electron-version=$ElectronVersion --electron-zip-dir=$($electronZip.DirectoryName) `
-  --app-version=$DshVersion --no-prune
+  --platform win32 --arch x64 --out $profile --overwrite `
+  --icon $stagedIcon `
+  --electron-version $ElectronVersion --electron-zip-dir $electronZip.DirectoryName `
+  --app-version $DshVersion --no-prune
 if ($LASTEXITCODE -ne 0) { throw "electron-packager failed (exit $LASTEXITCODE)" }
 $packed = Join-Path $profile 'DshDesktop-win32-x64'
 if (-not (Test-Path $packed)) { throw "packager output missing: $packed" }
+$packedExe = Join-Path $packed 'DshDesktop.exe'
+if (-not (Test-Path $packedExe -PathType Leaf)) { throw "packaged exe missing: $packedExe" }
+
+$iconVerifier = Join-Path $psRoot '.github\scripts\verify-exe-icon.mjs'
+$reseditModule = Join-Path $tools 'node_modules\resedit\dist\index.js'
+if (-not (Test-Path $iconVerifier -PathType Leaf)) { throw "icon verifier missing: $iconVerifier" }
+if (-not (Test-Path $reseditModule -PathType Leaf)) { throw "resedit module missing: $reseditModule" }
+& (Join-Path $build 'runtime\node.exe') $iconVerifier $stagedIcon $packedExe $reseditModule
+if ($LASTEXITCODE -ne 0) { throw "packaged exe icon verification failed (exit $LASTEXITCODE)" }
 
 # ── 6. assemble the portable tree ────────────────────────────────────────────
 $pkg = Join-Path $profile 'DeepSeek-Harness'
@@ -227,6 +241,7 @@ New-Item -ItemType Directory -Force -Path (Join-Path $pkg 'dsh-home'), (Join-Pat
 $readme = Get-Content (Join-Path $psRoot 'README.txt') -Raw
 $readme = [regex]::Replace($readme, '(?m)^版本：.*$', "版本：dsh $DshVersion / Node $NodeVersion / Electron $ElectronVersion")
 Set-Content (Join-Path $pkg 'README.txt') -Value $readme -Encoding utf8 -NoNewline
+Copy-Item (Join-Path $psRoot 'THIRD_PARTY_NOTICES.md') (Join-Path $pkg 'THIRD_PARTY_NOTICES.md') -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
 
 $manifest = [ordered]@{

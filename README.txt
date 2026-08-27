@@ -3,6 +3,8 @@ DeepSeek Harness 便携桌面版（Windows x64）
 版本：构建时自动写入；也可查看 manifest.json。
 系统要求：Windows 10 21H2 及以上（64 位）。
 无需安装 Node.js、npm 或任何其他运行环境，无需管理员权限。
+声明：这是独立的社区便携打包项目，与 DeepSeek 无隶属、合作、赞助或官方授权关系，也不是官方发布渠道。
+“DeepSeek Harness”名称和鲸鱼 LOGO 仅用于标识所打包的上游软件，其商标与品牌资产归 DeepSeek 所有。
 
 一、快速开始
 1. 将整个 DeepSeek-Harness 文件夹解压到任意位置。

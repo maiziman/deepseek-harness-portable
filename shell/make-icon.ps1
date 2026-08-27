@@ -1,69 +1,96 @@
-# Generates shell\icon.ico (256x256, PNG-compressed single entry) for the
-# desktop shell. Runs on Windows with System.Drawing available (pwsh).
+# Generates a PNG-compressed, multi-size Windows icon from app-icon.png.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
+$sourcePath = Join-Path $PSScriptRoot 'app-icon.png'
 $out = Join-Path $PSScriptRoot 'icon.ico'
-$size = 256
-$bmp = [System.Drawing.Bitmap]::new($size, $size)
-$g = [System.Drawing.Graphics]::FromImage($bmp)
+$sizes = @(16, 20, 24, 32, 40, 48, 64, 128, 256)
+if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
+  throw "desktop icon source missing: $sourcePath"
+}
+
+$source = [System.Drawing.Bitmap]::new($sourcePath)
+$pngImages = @()
 try {
-  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-  $g.Clear([System.Drawing.Color]::Transparent)
-
-  $r = 44
-  $d = $r * 2
-  $path = [System.Drawing.Drawing2D.GraphicsPath]::new()
-  try {
-    $path.AddArc(0, 0, $d, $d, 180, 90)
-    $path.AddArc($size - $d, 0, $d, $d, 270, 90)
-    $path.AddArc($size - $d, $size - $d, $d, $d, 0, 90)
-    $path.AddArc(0, $size - $d, $d, $d, 90, 90)
-    $path.CloseFigure()
-
-    $rect = [System.Drawing.Rectangle]::new(0, 0, $size, $size)
-    $brush = [System.Drawing.Drawing2D.LinearGradientBrush]::new(
-      $rect,
-      [System.Drawing.Color]::FromArgb(255, 77, 107, 254),
-      [System.Drawing.Color]::FromArgb(255, 11, 19, 42),
-      45)
-    $g.FillPath($brush, $path)
-
-    $font = [System.Drawing.Font]::new('Segoe UI', 92, [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
-    $sf = [System.Drawing.StringFormat]::new()
-    $sf.Alignment = [System.Drawing.StringAlignment]::Center
-    $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
-    $g.DrawString('DSH', $font, [System.Drawing.Brushes]::White, [System.Drawing.RectangleF]::new(0, 12, $size, $size), $sf)
-  } finally {
-    $path.Dispose()
+  if ($source.Width -ne $source.Height -or $source.Width -lt 256) {
+    throw "desktop icon source must be square and at least 256 px: $sourcePath"
   }
 
-  $pngStream = [System.IO.MemoryStream]::new()
-  try {
-    $bmp.Save($pngStream, [System.Drawing.Imaging.ImageFormat]::Png)
-    $png = $pngStream.ToArray()
-
-    # ICO container: ICONDIR + one ICONDIRENTRY (width/height 0 = 256) + PNG data.
-    $fs = [System.IO.File]::Create($out)
-    $bw = [System.IO.BinaryWriter]::new($fs)
-    try {
-      $bw.Write([byte]0); $bw.Write([byte]0)          # reserved
-      $bw.Write([byte]1); $bw.Write([byte]1)          # type icon, count 1
-      $bw.Write([byte]0); $bw.Write([byte]0)          # width 256
-      $bw.Write([byte]0); $bw.Write([byte]0)          # height 256
-      $bw.Write([byte]0); $bw.Write([byte]0)          # palette
-      $bw.Write([byte]0); $bw.Write([byte]0)          # reserved
-      $bw.Write([uint16]1); $bw.Write([uint16]32)     # planes, bpp
-      $bw.Write([uint32]$png.Length)
-      $bw.Write([uint32]22)                           # data offset
-      $bw.Write($png)
-    } finally {
-      $bw.Dispose(); $fs.Dispose()
+  $hasTransparentPixel = $false
+  $hasOpaquePixel = $false
+  for ($y = 0; $y -lt $source.Height -and -not ($hasTransparentPixel -and $hasOpaquePixel); $y += 1) {
+    for ($x = 0; $x -lt $source.Width; $x += 1) {
+      $alpha = $source.GetPixel($x, $y).A
+      if ($alpha -eq 0) { $hasTransparentPixel = $true }
+      if ($alpha -eq 255) { $hasOpaquePixel = $true }
+      if ($hasTransparentPixel -and $hasOpaquePixel) { break }
     }
-    Write-Output "icon written: $out ($($png.Length + 22) bytes)"
-  } finally {
-    $pngStream.Dispose()
+  }
+  if (-not $hasTransparentPixel -or -not $hasOpaquePixel) {
+    throw "desktop icon source must contain transparent and opaque pixels: $sourcePath"
+  }
+
+  foreach ($size in $sizes) {
+    $bitmap = [System.Drawing.Bitmap]::new(
+      $size,
+      $size,
+      [System.Drawing.Imaging.PixelFormat]::Format32bppArgb
+    )
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try {
+      $graphics.Clear([System.Drawing.Color]::Transparent)
+      $graphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
+      $graphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
+      $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+      $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+      $graphics.DrawImage($source, 0, 0, $size, $size)
+
+      $stream = [System.IO.MemoryStream]::new()
+      try {
+        $bitmap.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $pngImages += ,([byte[]]$stream.ToArray())
+      } finally {
+        $stream.Dispose()
+      }
+    } finally {
+      $graphics.Dispose()
+      $bitmap.Dispose()
+    }
   }
 } finally {
-  $g.Dispose(); $bmp.Dispose()
+  $source.Dispose()
 }
+
+$file = [System.IO.File]::Create($out)
+$writer = [System.IO.BinaryWriter]::new($file)
+try {
+  $writer.Write([uint16]0)
+  $writer.Write([uint16]1)
+  $writer.Write([uint16]$sizes.Count)
+
+  $offset = 6 + (16 * $sizes.Count)
+  for ($index = 0; $index -lt $sizes.Count; $index += 1) {
+    $size = $sizes[$index]
+    $png = [byte[]]$pngImages[$index]
+    $dimension = if ($size -eq 256) { [byte]0 } else { [byte]$size }
+    $writer.Write($dimension)
+    $writer.Write($dimension)
+    $writer.Write([byte]0)
+    $writer.Write([byte]0)
+    $writer.Write([uint16]1)
+    $writer.Write([uint16]32)
+    $writer.Write([uint32]$png.Length)
+    $writer.Write([uint32]$offset)
+    $offset += $png.Length
+  }
+
+  foreach ($png in $pngImages) {
+    $writer.Write([byte[]]$png)
+  }
+} finally {
+  $writer.Dispose()
+  $file.Dispose()
+}
+
+Write-Output "icon written: $out ($($sizes.Count) sizes, $((Get-Item $out).Length) bytes)"

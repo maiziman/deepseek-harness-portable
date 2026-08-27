@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
+const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 const {
@@ -57,7 +59,23 @@ test('loading page exposes an accessible bilingual progress display', () => {
   assert.match(chinese, /role="progressbar"/u)
   assert.match(chinese, /dshStartupProgress/u)
   assert.match(chinese, /进度只在真实启动阶段完成后推进/u)
+  assert.match(chinese, /img-src data:/u)
+  assert.match(chinese, /<img class="mark" src="data:image\/svg\+xml;base64,/u)
+  assert.match(chinese, /DEEPSEEK HARNESS · COMMUNITY PORTABLE/u)
+  assert.doesNotMatch(chinese, /class="mark">DSH/u)
   const english = loadingPage({ locale: 'en-US', firstRun: false, startedAt: 1000 })
   assert.match(english, /Progress advances only when a real startup milestone completes/u)
   assert.doesNotMatch(english, /首次启动/u)
+})
+
+test('startup mark preserves the official DeepSeek favicon geometry', () => {
+  const svg = fs.readFileSync(path.join(__dirname, 'deepseek-mark.svg'), 'utf8')
+  const viewBox = svg.match(/viewBox="([^"]+)"/u)?.[1]
+  const pathData = svg.match(/<path d="([^"]+)"/u)?.[1]
+  assert.equal(viewBox, '0 0 50 50')
+  assert.match(svg, /<path d="[^"]+" fill="#fff"\/>/u)
+  assert.equal(
+    crypto.createHash('sha256').update(`${viewBox}\0${pathData}`).digest('hex'),
+    '48a0379e7aa797840a15677d8cf84164ed0ab6172d050c8a41fd18491c155cf3',
+  )
 })

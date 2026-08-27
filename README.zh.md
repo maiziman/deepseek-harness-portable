@@ -20,8 +20,8 @@
   <a href="https://github.com/maiziman/deepseek-harness-portable/releases"><img alt="累计下载" src="https://img.shields.io/github/downloads/maiziman/deepseek-harness-portable/total"></a>
 </p>
 
-> [!NOTE]
-> 这是由社区维护的便携打包项目。应用本身由 DeepSeek AI 开发，DeepSeek Harness 上游仓库仍是产品源码的唯一来源。
+> [!IMPORTANT]
+> 这是独立的社区便携打包项目，与 DeepSeek 无隶属、合作、赞助或官方授权关系，也不是官方发布渠道。“DeepSeek Harness”名称和鲸鱼 LOGO 仅用于标识所打包的上游软件，属于 DeepSeek 的商标与品牌资产。
 
 ## 三步开始使用
 
@@ -120,4 +120,4 @@ DeepSeek Harness 本身的问题请提交到[上游 Issue](https://github.com/de
 
 ## 许可与致谢
 
-本仓库中的打包工具采用 [MIT 许可证](LICENSE)。构建产物由 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT，© DeepSeek AI）、Node.js、Electron 和各自许可下的 npm 依赖组装；每个包的 `manifest.json` 会记录精确版本。
+本仓库中的打包工具采用 [MIT 许可证](LICENSE)。构建产物由 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（MIT，© DeepSeek AI）、Node.js、Electron 和各自许可下的 npm 依赖组装；每个包的 `manifest.json` 会记录精确版本。鲸鱼标志复制自上游 favicon，仅用于标识所打包的上游软件，不表示 DeepSeek 对本项目的背书或授权。其来源和许可声明见[第三方声明](THIRD_PARTY_NOTICES.md)。

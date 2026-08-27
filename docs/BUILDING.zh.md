@@ -31,10 +31,11 @@
 ```text
 build-portable.ps1
  ├─ 解析并校验组件版本
+ ├─ 校验透明图标母版并生成 9 档 Windows 图标
  ├─ 下载官方 Windows x64 Node.js 运行时并验证 SHA256
  ├─ 把生产依赖安装为适合 ZIP 的扁平目录树
- ├─ 打包 Electron 桌面壳
- ├─ 组装 runtime/、app/、dsh-home/、workspace/、README.txt 和 dsh.cmd
+ ├─ 打包 Electron 桌面壳，并把 PE 中每档图标与源 ICO 逐一比对
+ ├─ 组装 runtime/、app/、dsh-home/、workspace/、第三方声明、README.txt 和 dsh.cmd
  ├─ 启动包内应用，等待本地服务并捕获渲染后的界面
  └─ 生成 ZIP 和 SHA256SUMS.txt
 ```
@@ -56,7 +57,7 @@ build-portable.ps1
 .\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v0.1.1-rc.2.zip
 ```
 
-验证探针会检查解压完整性、manifest 与运行时版本、启动进度页和最终 UI 的截图、真实服务启动、URL 发现、干净退出和首次 profile 初始化，并要求初始化后的组件链接数量与包内 manifest 一致。
+如果图标母版不同时包含透明和不透明像素、ICO 不是由 16、20、24、32、40、48、64、128 和 256 px 共 9 档 RGBA PNG 组成，或最终 EXE 的 PE 图标组与任一源图帧不同，构建都会终止。验证探针随后检查解压完整性、包内第三方声明、manifest 与运行时版本、启动进度页和最终 UI 的截图、真实服务启动、URL 发现、干净退出和首次 profile 初始化，并要求初始化后的组件链接数量与包内 manifest 一致。
 
 GitHub Actions 会在全新的 Windows Server 2022 和 2025 runner 上重复构建与验证。普通推送会上传短期工作流产物；`v*` 标签会把 ZIP 和校验和发布到 GitHub Release，上游跟踪流程会在发现新的官方 dsh 版本后自动公开经过验证的 Release。
 
