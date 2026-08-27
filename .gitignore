@@ -1,0 +1,19 @@
+# build outputs
+.build/
+.cache/
+dist/
+
+# logs
+*.log
+.build-bootstrap.log
+.build-run.log
+.build-progress.log
+
+# OS noise
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# editor
+.vscode/
+.idea/

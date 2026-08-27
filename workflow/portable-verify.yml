@@ -1,0 +1,59 @@
+# Compatibility verification matrix for the DeepSeek Harness portable package.
+#
+# Runs on every push and on tags v*; each runner is a fresh machine, so every
+# run doubles as a clean-environment compatibility check. `fail-fast: false`
+# reports every OS even when one fails.
+#
+# Jobs: build the Windows x64 package, run the verification probe, upload the
+# ZIP + checksum + screenshot as artifacts; on tags v*, also attach the ZIP to
+# a GitHub Release.
+name: dsh-portable-verify
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+          - os: windows-2025
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build portable package
+        shell: pwsh
+        run: |
+          .\build-portable.ps1 -ElectronMirror github
+
+      - name: Verify package (compatibility probe)
+        shell: pwsh
+        run: |
+          .\verify-package.ps1
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-portable-${{ matrix.os }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+          retention-days: 14
+
+      - name: Create GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.os == 'windows-2025'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/DeepSeek-Harness-*.zip
+            dist/SHA256SUMS.txt
+          draft: false
+          generate_release_notes: true
+
+  # Lightweight cross-OS sanity was considered here; it requires multi-platform
+  # packaging (Node runtime + Electron for darwin/linux) in build-portable.ps1.
+  # Until then the Windows runner pair above is the compatibility gate.

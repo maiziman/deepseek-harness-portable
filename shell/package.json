@@ -1,0 +1,10 @@
+{
+  "name": "dsh-desktop-shell",
+  "productName": "DeepSeek Harness",
+  "version": "1.0.0",
+  "description": "DeepSeek Harness portable desktop shell: spawns the bundled dsh server and shows the Web UI in a native window",
+  "main": "main.js",
+  "author": "DeepSeek Harness portable packager",
+  "license": "MIT",
+  "private": true
+}
