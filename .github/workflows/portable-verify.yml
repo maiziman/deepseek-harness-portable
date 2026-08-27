@@ -13,6 +13,11 @@ on:
   push:
   workflow_dispatch:
 
+# Explicit write scope: new repositories default GITHUB_TOKEN to read-only,
+# which breaks the release creation step below.
+permissions:
+  contents: write
+
 jobs:
   build-and-verify:
     strategy:
