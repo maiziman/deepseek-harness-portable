@@ -1,7 +1,6 @@
 # Detect new official @deepseek-ai/dsh packages, verify a matching portable
-# build on both supported Windows runner generations, and prepare a Draft
-# Release. Drafts are the publication gate: users see an update only after a
-# maintainer reviews and publishes the Release.
+# build on both supported Windows runner generations, and publish the Release
+# only after both builds pass.
 name: dsh-upstream-watch
 
 on:
@@ -72,7 +71,7 @@ jobs:
           if ($alreadyPackaged) {
             Write-Output "dsh $version already has a portable Release or Draft Release"
           } else {
-            Write-Output "dsh $version needs a verified portable Draft Release"
+            Write-Output "dsh $version needs a verified portable Release"
           }
 
   build-and-verify:
@@ -114,7 +113,7 @@ jobs:
             dist/SHA256SUMS.txt
           retention-days: 14
 
-  draft-release:
+  publish-release:
     needs: [detect, build-and-verify]
     if: needs.detect.outputs.should_build == 'true'
     runs-on: ubuntu-latest
@@ -125,26 +124,22 @@ jobs:
           name: dsh-portable-windows-2025-${{ needs.detect.outputs.dsh_version }}
           path: release-assets
 
-      - name: Create Draft Release
+      - name: Publish verified Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.detect.outputs.tag }}
           target_commitish: ${{ github.sha }}
           name: DeepSeek Harness Portable ${{ needs.detect.outputs.dsh_version }}
-          draft: true
+          draft: false
           prerelease: ${{ needs.detect.outputs.prerelease }}
           fail_on_unmatched_files: true
           body: |
             <!-- dsh-version: ${{ needs.detect.outputs.dsh_version }} -->
-            Automated portable candidate for official `@deepseek-ai/dsh@${{ needs.detect.outputs.dsh_version }}`.
+            Automated portable release for official `@deepseek-ai/dsh@${{ needs.detect.outputs.dsh_version }}`.
 
-            Before publishing this Draft Release:
+            The attached package passed clean builds and real UI boot probes on Windows Server 2022 and 2025. The Release is published only after both jobs succeed.
 
-            - Review upstream release notes and compatibility changes.
-            - Spot-check the ZIP on Windows 10 or 11.
-            - Confirm `SHA256SUMS.txt` matches the attached ZIP.
-
-            The attached package passed clean builds and real UI boot probes on Windows Server 2022 and 2025.
+            Verify the downloaded ZIP against `SHA256SUMS.txt` before use.
           files: |
             release-assets/*.zip
             release-assets/SHA256SUMS.txt

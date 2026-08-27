@@ -45,7 +45,7 @@ The desktop shell starts the bundled Node.js executable with `dsh web --no-open 
 
 The `dsh-upstream-watch` workflow runs every six hours and can also be started manually. It reads the official npm `latest` tag, then checks public and Draft Releases for a matching portable ZIP. A version without a package enters the Windows Server 2022 and 2025 build-and-verify matrix.
 
-After both runners pass, the workflow creates a Draft Release tagged `dsh-v<version>`. The draft includes the Windows 2025 ZIP, `SHA256SUMS.txt`, a machine-readable dsh version marker, and a publication checklist. A maintainer must review and publish the draft; the workflow never exposes a new upstream version directly to users.
+After both runners pass, the workflow publishes a Release tagged `dsh-v<version>`. The Release includes the Windows 2025 ZIP, `SHA256SUMS.txt`, and a machine-readable dsh version marker. A failed or cancelled build prevents publication.
 
 The packaged desktop app reads only published Releases. At most once every 24 hours it compares the highest valid portable asset version with `manifest.json`. A newer version produces an opt-in download prompt; the app does not download or replace files. Set `DSH_UPDATE_CHECK=0` before launch to disable the network check.
 
@@ -58,9 +58,9 @@ The packaged desktop app reads only published Releases. At most once every 24 ho
 
 The verification probe checks extraction completeness, manifest and runtime versions, a real server boot, URL discovery, UI rendering, clean shutdown, and first-run profile initialization.
 
-GitHub Actions repeats the build and probe on fresh Windows Server 2022 and 2025 runners. Pushes upload short-lived workflow artifacts; a `v*` tag publishes the ZIP and checksum to a GitHub Release, while upstream tracking prepares a Draft Release for maintainer approval.
+GitHub Actions repeats the build and probe on fresh Windows Server 2022 and 2025 runners. Pushes upload short-lived workflow artifacts; a `v*` tag publishes the ZIP and checksum to a GitHub Release, while upstream tracking publishes a verified Release when a new official dsh version appears.
 
-GitHub runners use Windows Server. Before publishing a user-facing release, spot-check the same ZIP on Windows 10 or 11, including SmartScreen behavior and common antivirus software.
+GitHub runners use Windows Server. Periodically spot-check a published ZIP on Windows 10 or 11, including SmartScreen behavior and common antivirus software.
 
 ## Repository layout
 

@@ -44,6 +44,7 @@ No API key is bundled. Windows SmartScreen may show an unrecognized-app warning 
 | **Portable by design** | Settings, sessions, plugins, and logs stay under `dsh-home` beside the app. Move or back up the folder as one unit. |
 | **Verifiable releases** | Node.js downloads are checked against official SHA256 files; each package records exact component versions and ships with Release checksums. |
 | **Clean-machine tested** | Every push builds and boots on fresh Windows Server 2022 and 2025 GitHub runners before artifacts are published. |
+| **Automatic upstream releases** | Official dsh versions are checked every six hours and published automatically only after both Windows build-and-verify jobs pass. |
 | **Update aware** | The desktop app checks published GitHub Releases at most once a day and prompts before opening the verified download page. It never replaces files silently. |
 
 ### Portable ZIP or the official npm install?
