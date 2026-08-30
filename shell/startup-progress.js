@@ -17,7 +17,7 @@ const STAGES = Object.freeze({
   folders: { progress: 14, step: 1 },
   runtime: { progress: 24, step: 2 },
   scan: { progress: 34, step: 2 },
-  links: { progress: 48, step: 2 },
+  links: { progress: 48, step: 3 },
   services: { progress: 78, step: 4 },
   server: { progress: 92, step: 4 },
   interface: { progress: 97, step: 5 },
@@ -142,6 +142,29 @@ function countProfileLinks(modulesDir, io = fs) {
   return count
 }
 
+/**
+ * Decide whether profile initialization is still observable as incomplete.
+ *
+ * The profile manifest is created before the shared dependency links, so it
+ * cannot by itself mark initialization complete. When the build did not
+ * record an expected link total, completion remains unknown until the server
+ * announces its URL.
+ *
+ * @param {boolean} profileManifestPresent Whether the profile manifest exists.
+ * @param {number} linked Completed profile dependency links.
+ * @param {number} total Expected dependency links recorded by the build.
+ * @returns {{needsInitialization: boolean, linksComplete: boolean}} Initialization state.
+ */
+function profileInitializationState(profileManifestPresent, linked, total) {
+  const completed = Number.isSafeInteger(linked) && linked >= 0 ? linked : 0
+  const expected = Number.isSafeInteger(total) && total > 0 ? total : 0
+  const linksComplete = profileManifestPresent === true && expected > 0 && completed >= expected
+  return {
+    needsInitialization: profileManifestPresent !== true || (expected > 0 && !linksComplete),
+    linksComplete,
+  }
+}
+
 function safeJson(value) {
   return JSON.stringify(value).replace(/</gu, '\\u003c')
 }
@@ -246,5 +269,6 @@ module.exports = {
   countProfileLinks,
   languageFor,
   loadingPage,
+  profileInitializationState,
   stageState,
 }

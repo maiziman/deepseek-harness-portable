@@ -1,6 +1,7 @@
 @echo off
 rem DeepSeek Harness portable CLI shim.
 rem Usage:  dsh.cmd web --port 8080 | dsh.cmd --profile headless "task in quotes"
+rem This direct CLI shim does not run the desktop launcher's plugin bootstrap.
 setlocal
 set "ROOT=%~dp0"
 set "DSH_HOME=%ROOT%dsh-home"

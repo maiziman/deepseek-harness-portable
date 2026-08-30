@@ -29,6 +29,9 @@ DeepSeek Harness 便携桌面版（Windows x64）
 在文件夹内打开 cmd 后运行：
   dsh.cmd web --port 8080        以指定端口启动（默认自动挑空闲端口）
   dsh.cmd --profile headless "任务"   运行一个一次性任务并退出
+命令行入口直接运行官方 CLI，不会执行桌面启动器的插件登记流程。
+如需在 Web profile 使用内置的模型能力插件，请先启动一次 DeepSeek-Harness.exe。
+headless profile 默认不加载该插件；需要时请用 dsh.cmd plugin --profile headless add <插件.tgz或目录> 手动添加。
 
 五、常见问题
 - Windows SmartScreen 拦截：点「更多信息」→「仍要运行」。
@@ -40,4 +43,4 @@ DeepSeek Harness 便携桌面版（Windows x64）
 
 六、构建信息
 本包由 portable-desktop\build-portable.ps1 构建；
-manifest.json 记录了 dsh / Node / Electron 版本与关键文件 SHA256。
+manifest.json 分别记录便携版本、dsh / Node / Electron 版本与关键文件 SHA256。

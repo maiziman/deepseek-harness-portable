@@ -1,6 +1,6 @@
 # Build the DeepSeek Harness portable desktop package for Windows x64.
 #
-# Produces: dist\DeepSeek-Harness-win64-v<dsh-version>.zip (+ SHA256SUMS.txt)
+# Produces: dist\DeepSeek-Harness-win64-v<portable-version>.zip (+ SHA256SUMS.txt)
 #
 # The package layout (zip root: DeepSeek-Harness\):
 #   DeepSeek-Harness.exe   Electron shell; double-click entry point
@@ -12,6 +12,7 @@
 [CmdletBinding()]
 param(
   [string]$DshVersion = '',
+  [string]$PortableVersion = '',
   [string]$NodeVersion = 'v24.19.0',
   [string]$ElectronVersion = '44.0.0',
   [string]$ElectronMirror = 'npmmirror',
@@ -32,6 +33,7 @@ $staging = Join-Path $build 'shell-stage'
 # (ERR_PNPM_INCLUDED_DEPS_CONFLICT) against the root node_modules.
 $scratch = Join-Path $env:TEMP 'dsh-portable-build'
 $tools = Join-Path $scratch 'tools'
+$modelCapabilitiesSource = Join-Path $psRoot 'plugins\dsh-model-capabilities'
 
 # pnpm is used instead of npm for all installs: the dsh dependency graph is a
 # few hundred packages and npm's reify planning stalls on it for minutes with
@@ -110,10 +112,12 @@ if (-not $DshVersion) {
 }
 $versionPattern = '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
 if ($DshVersion -notmatch $versionPattern) { throw "unexpected version format: $DshVersion" }
+if (-not $PortableVersion) { $PortableVersion = $DshVersion }
+if ($PortableVersion -notmatch $versionPattern) { throw "unexpected portable version format: $PortableVersion" }
 if ($NodeVersion -notmatch '^v?\d+\.\d+\.\d+$') { throw "unexpected Node version: $NodeVersion" }
 if (-not $NodeVersion.StartsWith('v')) { $NodeVersion = 'v' + $NodeVersion }
 
-Write-Output "=== target: dsh $DshVersion, node $NodeVersion, electron $ElectronVersion ==="
+Write-Output "=== target: portable $PortableVersion, dsh $DshVersion, node $NodeVersion, electron $ElectronVersion ==="
 
 # Electron binary source: npmmirror (default, for CN networks), github
 # (official, for CI runners), or any custom @electron/get mirror URL.
@@ -164,6 +168,7 @@ if ($nodeVer.Trim() -ne $NodeVersion) { throw "bundled node reports $nodeVer, ex
 $scratchApp = Join-Path $scratch 'app'
 Write-Output "=== installing @deepseek-ai/dsh@$DshVersion (production deps, pnpm) ==="
 Install-Pnpm
+Copy-Item (Join-Path $psRoot 'shell\pnpm.cmd') (Join-Path $build 'runtime\pnpm.cmd') -ErrorAction Stop
 Install-Target $scratchApp -ProdOnly @("@deepseek-ai/dsh@$DshVersion")
 $app = Join-Path $build 'app'
 Copy-Item -Recurse -Force $scratchApp $app
@@ -171,6 +176,31 @@ $dshBin = Join-Path $app 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 if (-not (Test-Path $dshBin)) { throw "dsh bin missing after install: $dshBin" }
 $dshPkg = Get-Content (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') | ConvertFrom-Json
 if ($dshPkg.version -cne $DshVersion) { throw "installed dsh version $($dshPkg.version) != $DshVersion" }
+
+# The capability helper is an ordinary official-format Bundle package. The
+# desktop shell registers this local package through `dsh plugin` when needed,
+# so replacing the upstream install cannot overwrite it. Copy only publishable
+# runtime files; tests stay in the repository.
+$modelCapabilitiesTarget = Join-Path $app 'node_modules\@maiziman\dsh-model-capabilities'
+$modelCapabilitiesFiles = @(
+  'package.json',
+  'index.js',
+  'capability-detection.js',
+  'cordis.patch.yml',
+  'README.md',
+  'README.zh.md',
+  'LICENSE'
+)
+New-Item -ItemType Directory -Force -Path $modelCapabilitiesTarget | Out-Null
+foreach ($file in $modelCapabilitiesFiles) {
+  $source = Join-Path $modelCapabilitiesSource $file
+  if (-not (Test-Path $source -PathType Leaf)) { throw "model capability plugin file missing: $source" }
+  Copy-Item $source (Join-Path $modelCapabilitiesTarget $file)
+}
+$modelCapabilitiesManifest = Get-Content (Join-Path $modelCapabilitiesTarget 'package.json') -Raw | ConvertFrom-Json
+if ($modelCapabilitiesManifest.dsh.bundle.patch -cne './cordis.patch.yml') {
+  throw 'model capability plugin is not an installable dsh Bundle'
+}
 
 # ── 4. Electron tools (build-only) ───────────────────────────────────────────
 Write-Output '=== installing electron 44.0.0 + @electron/packager (build-only, pnpm) ==='
@@ -198,6 +228,8 @@ New-Item -ItemType Directory -Force -Path $stagingShell | Out-Null
 Copy-Item (Join-Path $psRoot 'shell\package.json') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\main.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\startup-progress.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\launch-args.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\process-lifecycle.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\deepseek-mark.svg') $stagingShell -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'shell\update.js') $stagingShell
 $stagedIcon = Join-Path $stagingShell 'icon.ico'
@@ -214,7 +246,7 @@ if (-not $packagerCli) { throw '@electron/packager bin not found under shell-too
   --platform win32 --arch x64 --out $profile --overwrite `
   --icon $stagedIcon `
   --electron-version $ElectronVersion --electron-zip-dir $electronZip.DirectoryName `
-  --app-version $DshVersion --no-prune
+  --app-version $PortableVersion --no-prune
 if ($LASTEXITCODE -ne 0) { throw "electron-packager failed (exit $LASTEXITCODE)" }
 $packed = Join-Path $profile 'DshDesktop-win32-x64'
 if (-not (Test-Path $packed)) { throw "packager output missing: $packed" }
@@ -239,7 +271,7 @@ Copy-Item -Recurse -Force (Join-Path $build 'runtime') (Join-Path $pkg 'runtime'
 Copy-Item -Recurse -Force $app (Join-Path $pkg 'app')
 New-Item -ItemType Directory -Force -Path (Join-Path $pkg 'dsh-home'), (Join-Path $pkg 'workspace') | Out-Null
 $readme = Get-Content (Join-Path $psRoot 'README.txt') -Raw
-$readme = [regex]::Replace($readme, '(?m)^版本：.*$', "版本：dsh $DshVersion / Node $NodeVersion / Electron $ElectronVersion")
+$readme = [regex]::Replace($readme, '(?m)^版本：.*$', "版本：portable $PortableVersion / dsh $DshVersion / Node $NodeVersion / Electron $ElectronVersion")
 Set-Content (Join-Path $pkg 'README.txt') -Value $readme -Encoding utf8 -NoNewline
 Copy-Item (Join-Path $psRoot 'THIRD_PARTY_NOTICES.md') (Join-Path $pkg 'THIRD_PARTY_NOTICES.md') -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
@@ -247,10 +279,12 @@ Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
 $manifest = [ordered]@{
   name = 'DeepSeek Harness portable desktop'
   platform = 'win32'; arch = 'x64'
+  portableVersion = $PortableVersion
   dshVersion = $DshVersion
   nodeVersion = $NodeVersion
   electronVersion = $ElectronVersion
   updateFeed = 'https://github.com/maiziman/deepseek-harness-portable/releases'
+  modelCapabilitiesVersion = $modelCapabilitiesManifest.version
   startupProfileLinkCount = $null
   builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   runtimeSource = if ((Test-Path (Join-Path $runtimeSrc 'node.exe')) -and -not $ForceDownloadNode) { 'local-reuse' } else { 'https://nodejs.org/dist/' }
@@ -274,9 +308,20 @@ if (-not $SkipSmoke) {
     $env:DSH_SMOKE_OUT = $smokeOut
     $env:DSH_SMOKE_PROGRESS_OUT = $startupSmokeOut
     $proc = Start-Process -FilePath (Join-Path $pkg 'DeepSeek-Harness.exe') -WorkingDirectory $pkg -PassThru
-    if (-not $proc.WaitForExit(150000)) {
-      Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-      throw 'smoke test timed out after 150s'
+    $smokeTimeoutMs = 270000
+    if (-not $proc.WaitForExit($smokeTimeoutMs)) {
+      $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+      $killer = Start-Process -FilePath $taskkill -ArgumentList @('/PID', [string]$proc.Id, '/T', '/F') -WindowStyle Hidden -PassThru
+      $killerTimedOut = -not $killer.WaitForExit(15000)
+      if ($killerTimedOut) {
+        Stop-Process -Id $killer.Id -Force -ErrorAction SilentlyContinue
+        [void]$killer.WaitForExit(5000)
+      }
+      $killerExitCode = if ($killerTimedOut) { -1 } else { $killer.ExitCode }
+      if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+      if (-not $proc.WaitForExit(10000)) { throw 'smoke cleanup could not terminate the desktop process within 10s' }
+      if ($killerExitCode -ne 0) { throw "smoke cleanup could not terminate the complete process tree (taskkill exit $killerExitCode)" }
+      throw 'smoke test timed out after 270s'
     }
     if ($proc.ExitCode -ne 0) {
       throw "smoke test failed (exit $($proc.ExitCode)); see $pkg\dsh-home\logs\server.log"
@@ -317,7 +362,7 @@ Remove-Item -Recurse -Force (Join-Path $pkg 'dsh-home') -ErrorAction SilentlyCon
 New-Item -ItemType Directory -Force -Path (Join-Path $pkg 'dsh-home') | Out-Null
 
 # ── 8. zip + checksums ───────────────────────────────────────────────────────
-$zipName = "DeepSeek-Harness-win64-v$DshVersion.zip"
+$zipName = "DeepSeek-Harness-win64-v$PortableVersion.zip"
 $zipPath = Join-Path $dist $zipName
 Write-Output "=== zipping $zipName ==="
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }

@@ -1,0 +1,294 @@
+# Publish the independent model-capabilities Bundle from its own version tag.
+# The package remains separate from portable ZIP Releases and never becomes the
+# repository's Latest Release.
+name: dsh-model-capabilities-release
+
+on:
+  push:
+    tags:
+      - 'plugin-model-capabilities-v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-model-capabilities-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      package_name: ${{ steps.pack.outputs.package_name }}
+      plugin_prerelease: ${{ steps.version.outputs.plugin_prerelease }}
+      plugin_version: ${{ steps.version.outputs.plugin_version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Test isolated Release staging and publication
+        shell: pwsh
+        run: '& ./.github/scripts/release-scripts.test.ps1'
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Match the tag to the package version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifest = Get-Content ./plugins/dsh-model-capabilities/package.json -Raw | ConvertFrom-Json
+          $version = [string]$manifest.version
+          $versionPattern = '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?<prerelease>(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          $versionMatch = [regex]::Match($version, $versionPattern)
+          if (-not $versionMatch.Success) { throw "plugin version is not valid Semantic Version text: $version" }
+          if ($env:RELEASE_TAG -cne "plugin-model-capabilities-v$version") {
+            throw "plugin tag $env:RELEASE_TAG does not match package version $version"
+          }
+          "plugin_prerelease=$($versionMatch.Groups['prerelease'].Success.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "plugin_version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Test the plugin
+        shell: pwsh
+        run: |
+          Push-Location ./plugins/dsh-model-capabilities
+          try {
+            node --test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            npm pack --ignore-scripts --dry-run
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Pack and verify the published files
+        id: pack
+        shell: pwsh
+        env:
+          PLUGIN_VERSION: ${{ steps.version.outputs.plugin_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $assets = Join-Path $PWD 'release-assets'
+          New-Item -ItemType Directory -Path $assets | Out-Null
+          Push-Location ./plugins/dsh-model-capabilities
+          try {
+            $packJson = (npm pack --ignore-scripts --json --pack-destination $assets | Out-String)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+          $packResponse = $packJson | ConvertFrom-Json
+          $packs = @($packResponse)
+          if ($packs.Count -ne 1) { throw "expected one packed plugin, found $($packs.Count)" }
+          $pack = $packs[0]
+          $expectedName = "maiziman-dsh-model-capabilities-$env:PLUGIN_VERSION.tgz"
+          if ([string]$pack.filename -cne $expectedName) { throw "unexpected plugin package name: $($pack.filename)" }
+          $expectedFiles = @(
+            'LICENSE',
+            'README.md',
+            'README.zh.md',
+            'capability-detection.js',
+            'cordis.patch.yml',
+            'index.js',
+            'package.json'
+          ) | Sort-Object
+          $actualFiles = @($pack.files | ForEach-Object { [string]$_.path }) | Sort-Object
+          if ([int]$pack.entryCount -ne 7 -or (Compare-Object $expectedFiles $actualFiles)) {
+            throw "plugin tarball does not contain exactly the seven published files: $($actualFiles -join ', ')"
+          }
+          $packagePath = Join-Path $assets $expectedName
+          $hash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $expectedName" | Set-Content -LiteralPath (Join-Path $assets 'SHA256SUMS.txt') -Encoding utf8NoBOM
+
+          $installRoot = Join-Path $env:RUNNER_TEMP 'plugin-tarball-install'
+          New-Item -ItemType Directory -Path $installRoot | Out-Null
+          npm install --ignore-scripts --no-package-lock --no-save --prefix $installRoot $packagePath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location $installRoot
+          try {
+            node --input-type=module -e "const plugin = await import('@maiziman/dsh-model-capabilities'); if (plugin.name !== 'model-capabilities' || typeof plugin.apply !== 'function') process.exit(1)"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+          "package_name=$expectedName" >> $env:GITHUB_OUTPUT
+
+      - name: Install through the exact compatible official DSH source
+        shell: pwsh
+        env:
+          PACKAGE_NAME: ${{ steps.pack.outputs.package_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $compatibility = Get-Content ./.github/plugin-compatibility.json -Raw | ConvertFrom-Json
+          if ([string]$compatibility.dshTag -notmatch '^dsh-v.+$') { throw 'compatibility dshTag is invalid' }
+          if ([string]$compatibility.dshSha -notmatch '^[0-9a-f]{40}$') { throw 'compatibility dshSha is invalid' }
+          if ([string]$compatibility.pnpmVersion -notmatch '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$') {
+            throw 'compatibility pnpmVersion is invalid'
+          }
+
+          $officialRoot = Join-Path $env:RUNNER_TEMP 'deepseek-harness-compatibility'
+          $dshHome = Join-Path $env:RUNNER_TEMP 'dsh-plugin-compatibility-home'
+          $packagePath = (Resolve-Path (Join-Path ./release-assets $env:PACKAGE_NAME)).Path
+          git init $officialRoot | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $officialRoot remote add origin https://github.com/deepseek-ai/deepseek-harness.git
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git -C $officialRoot fetch --no-tags --depth 1 origin "refs/tags/$($compatibility.dshTag)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $resolvedSha = (git -C $officialRoot rev-parse 'FETCH_HEAD^{commit}' | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($resolvedSha -cne [string]$compatibility.dshSha) {
+            throw "official tag $($compatibility.dshTag) resolved to $resolvedSha instead of $($compatibility.dshSha)"
+          }
+          git -C $officialRoot checkout --detach $resolvedSha
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          npm install --global "pnpm@$($compatibility.pnpmVersion)"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $installedPnpm = (pnpm --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($installedPnpm -cne [string]$compatibility.pnpmVersion) {
+            throw "pnpm version $installedPnpm does not match compatibility pin $($compatibility.pnpmVersion)"
+          }
+
+          Push-Location $officialRoot
+          try {
+            pnpm install --frozen-lockfile
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            pnpm run build
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $env:DSH_HOME = $dshHome
+            pnpm dsh plugin --profile web add $packagePath --offline
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $dump = (pnpm dsh --profile web --dump-config | Out-String)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            foreach ($required in @('@maiziman/dsh-model-capabilities', 'reasoningProbe', 'visionProbe')) {
+              if (-not $dump.Contains($required)) { throw "expanded Web profile is missing $required" }
+            }
+            pnpm dsh --profile web --help | Out-Null
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+            $serverOut = Join-Path $env:RUNNER_TEMP 'dsh-plugin-compatibility-server.out.log'
+            $serverErr = Join-Path $env:RUNNER_TEMP 'dsh-plugin-compatibility-server.err.log'
+            $node = (Get-Command node -ErrorAction Stop).Source
+            $server = Start-Process `
+              -FilePath $node `
+              -ArgumentList @('--import', 'tsx/esm', 'apps/cli/src/bin.ts', 'web', '--no-open', '--port', '0') `
+              -WorkingDirectory $officialRoot `
+              -RedirectStandardOutput $serverOut `
+              -RedirectStandardError $serverErr `
+              -PassThru
+            try {
+              $ready = $false
+              $deadline = [DateTime]::UtcNow.AddSeconds(120)
+              while ([DateTime]::UtcNow -lt $deadline -and -not $server.HasExited) {
+                $serverText = @(
+                  if (Test-Path -LiteralPath $serverOut -PathType Leaf) { Get-Content -LiteralPath $serverOut -Raw }
+                  if (Test-Path -LiteralPath $serverErr -PathType Leaf) { Get-Content -LiteralPath $serverErr -Raw }
+                ) -join "`n"
+                if ($serverText -match 'dsh web: http://127\.0\.0\.1:[0-9]+') {
+                  $ready = $true
+                  break
+                }
+                Start-Sleep -Seconds 1
+              }
+              if (-not $ready) {
+                $serverText = @(
+                  if (Test-Path -LiteralPath $serverOut -PathType Leaf) { Get-Content -LiteralPath $serverOut -Raw }
+                  if (Test-Path -LiteralPath $serverErr -PathType Leaf) { Get-Content -LiteralPath $serverErr -Raw }
+                ) -join "`n"
+                $exitText = if ($server.HasExited) { [string]$server.ExitCode } else { 'running' }
+                throw "compatible Web profile did not announce a URL within 120s (exit=$exitText)`n$serverText"
+              }
+            } finally {
+              if (-not $server.HasExited) {
+                Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+                if (-not $server.WaitForExit(10000)) { throw 'compatibility Web profile did not stop within 10s' }
+              }
+            }
+          } finally {
+            Pop-Location
+          }
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dsh-model-capabilities-${{ steps.version.outputs.plugin_version }}
+          path: |
+            release-assets/*.tgz
+            release-assets/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    needs: pack-and-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dsh-model-capabilities-${{ needs.pack-and-test.outputs.plugin_version }}
+          path: release-assets
+
+      - name: Stage verified plugin Draft Release by exact id
+        id: stage
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_NAME: ${{ needs.pack-and-test.outputs.package_name }}
+          PLUGIN_VERSION: ${{ needs.pack-and-test.outputs.plugin_version }}
+          PRERELEASE: ${{ needs.pack-and-test.outputs.plugin_prerelease }}
+          TARGET_COMMIT: ${{ github.sha }}
+          RELEASE_BODY: |
+            Independent DeepSeek Harness Bundle for automatic reasoning and image-input capability discovery on custom OpenAI-compatible model providers.
+
+            The package passed its complete test suite, published-file check, clean tarball installation, SHA256 verification, and installation through the exact pinned official DeepSeek Harness source. DeepSeek Harness Portable already includes this plugin; the attached `.tgz` is for independent installation through the official `dsh plugin` command.
+
+            Verify the tarball against `SHA256SUMS.txt` before installing it.
+        run: |
+          ./.github/scripts/stage-release.ps1 `
+            -Repository $env:REPOSITORY `
+            -Tag $env:RELEASE_TAG `
+            -PackageName $env:PACKAGE_NAME `
+            -ReleaseName "DSH Model Capabilities Plugin v$env:PLUGIN_VERSION" `
+            -Body $env:RELEASE_BODY `
+            -TargetCommitish $env:TARGET_COMMIT `
+            -Prerelease $env:PRERELEASE `
+            -MakeLatest false
+
+      - name: Validate assets and publish plugin Release
+        if: steps.stage.outputs.should_publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_NAME: ${{ needs.pack-and-test.outputs.package_name }}
+          PRERELEASE: ${{ needs.pack-and-test.outputs.plugin_prerelease }}
+          DRAFT_TAG: ${{ steps.stage.outputs.draft_tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_BODY_SHA256: ${{ steps.stage.outputs.body_sha256 }}
+          RELEASE_ID: ${{ steps.stage.outputs.release_id }}
+        run: |
+          ./.github/scripts/finalize-release.ps1 `
+            -Repository $env:REPOSITORY `
+            -Tag $env:RELEASE_TAG `
+            -PackageName $env:PACKAGE_NAME `
+            -DraftTag $env:DRAFT_TAG `
+            -ExpectedCommit $env:EXPECTED_COMMIT `
+            -ExpectedBodySha256 $env:EXPECTED_BODY_SHA256 `
+            -ReleaseId $env:RELEASE_ID `
+            -Prerelease $env:PRERELEASE `
+            -MakeLatest false

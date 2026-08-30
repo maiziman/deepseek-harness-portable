@@ -6,8 +6,10 @@ const test = require('node:test')
 const {
   CHECK_INTERVAL_MS,
   availableUpdate,
+  collectReleasePages,
   isNewerVersion,
   isTrustedReleaseUrl,
+  packagedPortableVersion,
   parseVersion,
   selectLatestRelease,
   shouldCheck,
@@ -16,11 +18,12 @@ const {
 function release(version, options = {}) {
   return {
     draft: options.draft === true,
-    html_url: options.url || `https://github.com/maiziman/deepseek-harness-portable/releases/tag/dsh-v${version}`,
+    html_url: options.url || `https://github.com/maiziman/deepseek-harness-portable/releases/tag/v${version}`,
+    tag_name: options.tag || `v${version}`,
     name: options.name || `DeepSeek Harness Portable ${version}`,
     assets: [
-      { name: `DeepSeek-Harness-win64-v${version}.zip` },
-      { name: 'SHA256SUMS.txt' },
+      { name: `DeepSeek-Harness-win64-v${version}.zip`, state: 'uploaded', size: 1024, digest: `sha256:${'a'.repeat(64)}` },
+      { name: 'SHA256SUMS.txt', state: 'uploaded', size: 96, digest: `sha256:${'b'.repeat(64)}` },
     ],
   }
 }
@@ -40,8 +43,26 @@ test('version parsing and ordering follow Semantic Version precedence', () => {
   assert.equal(isNewerVersion('1.0.0+build.2', '1.0.0+build.1'), false)
 })
 
+test('packaged portable version uses the new field and supports legacy manifests', () => {
+  assert.equal(packagedPortableVersion({ portableVersion: '1.2.1', dshVersion: '0.1.2-alpha.1' }), '1.2.1')
+  assert.equal(packagedPortableVersion({ dshVersion: '0.1.1-rc.2' }), '0.1.1-rc.2')
+  assert.equal(packagedPortableVersion({ portableVersion: 'invalid', dshVersion: '0.1.1-rc.2' }), null)
+  assert.equal(packagedPortableVersion(null), null)
+})
+
 test('release selection ignores drafts, foreign URLs, and malformed assets', () => {
+  const pluginRelease = {
+    draft: false,
+    html_url: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.0',
+    tag_name: 'plugin-model-capabilities-v0.1.0',
+    name: 'DSH Model Capabilities Plugin v0.1.0',
+    assets: [
+      { name: 'maiziman-dsh-model-capabilities-0.1.0.tgz' },
+      { name: 'SHA256SUMS.txt' },
+    ],
+  }
   const releases = [
+    pluginRelease,
     release('0.2.0-rc.1', { draft: true }),
     release('0.1.9', { url: 'https://example.com/releases/0.1.9' }),
     { ...release('0.1.8'), assets: [{ name: 'source.zip' }] },
@@ -51,16 +72,54 @@ test('release selection ignores drafts, foreign URLs, and malformed assets', () 
   ]
   assert.deepEqual(selectLatestRelease(releases), {
     version: '0.1.1-rc.3',
-    releaseUrl: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/dsh-v0.1.1-rc.3',
+    releaseUrl: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/v0.1.1-rc.3',
     releaseName: 'DeepSeek Harness Portable 0.1.1-rc.3',
   })
   assert.equal(isTrustedReleaseUrl('https://github.com/maiziman/deepseek-harness-portable/releases/tag/v1'), true)
   assert.equal(isTrustedReleaseUrl('https://github.com/another/repository/releases/tag/v1'), false)
+  assert.equal(selectLatestRelease([pluginRelease]), null)
 })
 
 test('an update is offered only for a newer public portable package', () => {
   assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.2')]), null)
   assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.3')]).version, '0.1.1-rc.3')
+})
+
+test('release selection rejects portable releases with extra assets', () => {
+  assert.equal(selectLatestRelease([{ ...release('1.2.1'), assets: [...release('1.2.1').assets, { name: 'extra.txt' }] }]), null)
+})
+
+test('release selection requires matching tag and complete asset records', () => {
+  assert.equal(selectLatestRelease([release('1.2.1', { tag: 'v1.2.0' })]), null)
+  assert.equal(selectLatestRelease([release('1.2.1', {
+    url: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/v1.2.0',
+  })]), null)
+  const incomplete = release('1.2.1')
+  incomplete.assets[0] = { ...incomplete.assets[0], digest: null }
+  assert.equal(selectLatestRelease([incomplete]), null)
+})
+
+test('release pagination reaches a portable package after a full plugin page', async () => {
+  const pluginPage = Array.from({ length: 100 }, (_, index) => ({
+    draft: false,
+    html_url: `https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-${index}`,
+    name: `Plugin ${index}`,
+    assets: [{ name: `plugin-${index}.tgz` }, { name: 'SHA256SUMS.txt' }],
+  }))
+  const requested = []
+  const releases = await collectReleasePages(async (page) => {
+    requested.push(page)
+    return page === 1 ? pluginPage : [release('0.2.0-alpha.1')]
+  })
+  assert.deepEqual(requested, [1, 2])
+  assert.equal(selectLatestRelease(releases).version, '0.2.0-alpha.1')
+})
+
+test('release pagination fails closed at its bounded page limit', async () => {
+  await assert.rejects(
+    collectReleasePages(async () => Array.from({ length: 100 }, () => ({}))),
+    /exceeded the 5-page update-check limit/u,
+  )
 })
 
 test('the update interval tolerates missing, invalid, and future state', () => {

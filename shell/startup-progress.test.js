@@ -10,6 +10,7 @@ const {
   countProfileLinks,
   languageFor,
   loadingPage,
+  profileInitializationState,
   stageState,
 } = require('./startup-progress.js')
 
@@ -28,6 +29,7 @@ test('startup stages are localized and advance monotonically', () => {
   assert.equal(languageFor('zh-Hans'), 'zh')
   assert.equal(languageFor('en-US'), 'en')
   assert.match(stageState('runtime', { locale: 'zh-CN', firstRun: true }).detail, /首次启动/u)
+  assert.equal(stageState('links', { locale: 'en', firstRun: true }).step, 3)
   assert.equal(stageState('ready', { locale: 'en' }).progress, 100)
 })
 
@@ -51,6 +53,25 @@ test('profile link counting ignores real directories and counts scoped links', (
   }
   assert.equal(countProfileLinks(root, io), 3)
   assert.equal(countProfileLinks('missing', io), 0)
+})
+
+test('profile initialization remains active when the manifest appears before its links', () => {
+  assert.deepEqual(profileInitializationState(false, 0, 100), {
+    needsInitialization: true,
+    linksComplete: false,
+  })
+  assert.deepEqual(profileInitializationState(true, 18, 100), {
+    needsInitialization: true,
+    linksComplete: false,
+  })
+  assert.deepEqual(profileInitializationState(true, 100, 100), {
+    needsInitialization: false,
+    linksComplete: true,
+  })
+  assert.deepEqual(profileInitializationState(true, 100, 0), {
+    needsInitialization: false,
+    linksComplete: false,
+  })
 })
 
 test('loading page exposes an accessible bilingual progress display', () => {

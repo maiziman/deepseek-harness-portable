@@ -1,0 +1,44 @@
+{
+  "name": "@maiziman/dsh-model-capabilities",
+  "version": "0.1.0",
+  "description": "Automatic reasoning and image-input capability discovery for custom DeepSeek Harness model providers",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./detection": "./capability-detection.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "capability-detection.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/maiziman/deepseek-harness-portable.git",
+    "directory": "plugins/dsh-model-capabilities"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "reasoning",
+    "vision",
+    "openai-compatible"
+  ],
+  "license": "MIT"
+}

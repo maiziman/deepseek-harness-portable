@@ -44,8 +44,9 @@ No API key is bundled. Windows SmartScreen may show an unrecognized-app warning 
 | **Portable by design** | Settings, sessions, plugins, and logs stay under `dsh-home` beside the app. Move or back up the folder as one unit. |
 | **Verifiable releases** | Node.js downloads are checked against official SHA256 files; each package records exact component versions and ships with Release checksums. |
 | **Clean-machine tested** | Every push builds and boots on fresh Windows Server 2022 and 2025 GitHub runners before artifacts are published. |
-| **Automatic upstream releases** | Official dsh versions are checked every six hours and published automatically only after both Windows jobs and the staged Release assets pass verification. |
+| **Automatic upstream releases** | The highest official `dsh-v*` tag is checked every six hours. Once its exact npm package exists, a verified build receives the next project `v<portable-version>` and a ZIP with the same number. |
 | **Update aware** | The desktop app checks published GitHub Releases at most once a day and prompts before opening the verified download page. It never replaces files silently. |
+| **Custom model capabilities** | A bundled, independently installable plugin reads declared reasoning and image-input metadata. For incomplete local-network endpoints it can verify capabilities with bounded background probes, without modifying the official dsh adapter. |
 
 ### Portable ZIP or the official npm install?
 
@@ -61,8 +62,11 @@ No API key is bundled. Windows SmartScreen may show an unrecognized-app warning 
 - **System:** Windows 10 21H2 or newer, Windows 11, x64 architecture.
 - **Permissions:** no administrator access; the UI and its server stay on the local machine.
 - **Package contents:** official Node.js runtime, the published `@deepseek-ai/dsh` package, production dependencies, and the Electron desktop shell.
+- **Capability plugin:** the launcher registers the included [`@maiziman/dsh-model-capabilities`](plugins/dsh-model-capabilities/README.md) Bundle through the official `dsh plugin` workflow when needed. It only fills missing custom-model fields, never guesses from a model name, and never makes active inference requests to public endpoints by default.
 - **Verification:** compare the downloaded ZIP with `SHA256SUMS.txt`, then run `verify-package.ps1` for a real boot and UI-render probe.
 - **Current maturity:** DeepSeek Harness 0.1 is a preview for Harness developers; the UI, plugins, and APIs are still evolving quickly.
+
+The portable ZIP already includes the capability plugin. Users of the official npm installation can add it separately from the [Model Capabilities Plugin v0.1.0 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.0); the plugin Release has its own checksum and version lifecycle and does not replace the latest portable download.
 
 See [Building and verification](docs/BUILDING.md) for the complete build pipeline, version pins, verification matrix, and release process.
 
@@ -73,7 +77,7 @@ See [Building and verification](docs/BUILDING.md) for the complete build pipelin
 .\build-portable.ps1
 ```
 
-The command produces `dist\DeepSeek-Harness-win64-v<dsh-version>.zip` and `dist\SHA256SUMS.txt`. Every downloaded Node.js runtime is verified before it enters the package.
+The command produces `dist\DeepSeek-Harness-win64-v<portable-version>.zip` and `dist\SHA256SUMS.txt`. `manifest.json` records that portable version separately from the packaged official dsh version. Every downloaded Node.js runtime is verified before it enters the package.
 
 ## FAQ
 
@@ -94,14 +98,14 @@ Close the app and delete its folder. The portable build creates no installer or 
 <details>
 <summary><strong>Can I use the command line?</strong></summary>
 
-Yes. Run `dsh.cmd web` for the Web UI or `dsh.cmd --profile headless "task"` for a headless task.
+Yes. Run `dsh.cmd web` for the Web UI or `dsh.cmd --profile headless "task"` for a headless task. The CLI shim starts the official CLI directly; it does not run the desktop launcher's plugin bootstrap. Open `DeepSeek-Harness.exe` once before using `dsh.cmd web` if you want the bundled model-capabilities plugin in the Web profile. The headless profile remains stock unless you install the Bundle into that profile with `dsh.cmd plugin --profile headless add <plugin.tgz-or-directory>`.
 
 </details>
 
 <details>
 <summary><strong>How do updates work?</strong></summary>
 
-The app checks this repository's published Releases at most once every 24 hours. A newer portable package opens an opt-in prompt with the current and new dsh versions. The app does not download or replace files automatically; verify the Release checksum, close the app, extract the new package, and preserve `dsh-home` and `workspace`. Set `DSH_UPDATE_CHECK=0` before launch to disable the check.
+The app checks this repository's published Releases at most once every 24 hours. A newer portable package opens an opt-in prompt with the current and new portable versions. The app does not download or replace files automatically; verify the Release checksum, close the app, extract the new package, and preserve `dsh-home` and `workspace`. Packages created before the separate portable version field remain supported. Set `DSH_UPDATE_CHECK=0` before launch to disable the check.
 
 </details>
 

@@ -17,6 +17,8 @@
 param(
   [string]$ZipPath = '',
   [string]$WorkDir = '',
+  [string]$ExpectedPortableVersion = '',
+  [string]$ExpectedDshVersion = '',
   [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
@@ -57,18 +59,51 @@ $unpackedUpdateModule = Join-Path $pkgRoot 'resources\app\update.js'
 if (-not (Test-Path $shellArchive) -and -not (Test-Path $unpackedUpdateModule)) {
   throw 'extraction incomplete: packaged desktop shell missing'
 }
+if (Test-Path $unpackedUpdateModule -PathType Leaf) {
+  foreach ($shellFile in @('main.js', 'startup-progress.js', 'launch-args.js', 'process-lifecycle.js', 'update.js', 'deepseek-mark.svg')) {
+    if (-not (Test-Path (Join-Path $pkgRoot "resources\app\$shellFile") -PathType Leaf)) {
+      throw "extraction incomplete: packaged desktop shell file missing: $shellFile"
+    }
+  }
+}
 Write-Output ('[1/4] extraction OK: {0} files' -f (Get-ChildItem $pkgRoot -Recurse -File).Count)
 
 # ── 2. manifest + node runtime ───────────────────────────────────────────────
 $manifestPath = Join-Path $pkgRoot 'manifest.json'
 if (-not (Test-Path $manifestPath)) { throw 'manifest.json missing' }
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+$semanticVersionPattern = '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+if ([string]$manifest.portableVersion -notmatch $semanticVersionPattern) { throw 'manifest has no valid portable version' }
+if ([string]$manifest.dshVersion -notmatch $semanticVersionPattern) { throw 'manifest has no valid dsh version' }
+if ($ExpectedPortableVersion -and [string]$manifest.portableVersion -cne $ExpectedPortableVersion) {
+  throw "manifest portable version does not match the requested build: $($manifest.portableVersion) != $ExpectedPortableVersion"
+}
+if ($ExpectedDshVersion -and [string]$manifest.dshVersion -cne $ExpectedDshVersion) {
+  throw "manifest dsh version does not match the requested build: $($manifest.dshVersion) != $ExpectedDshVersion"
+}
+$expectedZipName = "DeepSeek-Harness-win64-v$($manifest.portableVersion).zip"
+if ((Split-Path -Leaf $ZipPath) -cne $expectedZipName) {
+  throw "ZIP name does not match manifest portable version: expected $expectedZipName"
+}
 $nodeVer = & (Join-Path $pkgRoot 'runtime\node.exe') --version
 if ($nodeVer.Trim() -ne $manifest.nodeVersion) { throw "node version mismatch: $($nodeVer.Trim()) != $($manifest.nodeVersion)" }
+if (-not (Test-Path (Join-Path $pkgRoot 'runtime\pnpm.cmd') -PathType Leaf)) { throw 'bundled pnpm launcher is missing' }
 if ($manifest.updateFeed -ne 'https://github.com/maiziman/deepseek-harness-portable/releases') { throw "unexpected update feed: $($manifest.updateFeed)" }
+if ($manifest.modelCapabilitiesVersion -notmatch '^\d+\.\d+\.\d+') { throw 'manifest has no model capability plugin version' }
 if ($manifest.startupProfileLinkCount -le 0) { throw 'manifest has no startup profile component total' }
+$modelCapabilitiesRoot = Join-Path $pkgRoot 'app\node_modules\@maiziman\dsh-model-capabilities'
+$modelCapabilitiesManifestPath = Join-Path $modelCapabilitiesRoot 'package.json'
+$modelCapabilitiesPatchPath = Join-Path $modelCapabilitiesRoot 'cordis.patch.yml'
+if (-not (Test-Path $modelCapabilitiesManifestPath -PathType Leaf) -or -not (Test-Path $modelCapabilitiesPatchPath -PathType Leaf)) {
+  throw 'model capability Bundle is missing from the portable app'
+}
+$modelCapabilitiesManifest = Get-Content $modelCapabilitiesManifestPath -Raw | ConvertFrom-Json
+if (($modelCapabilitiesManifest.version -cne $manifest.modelCapabilitiesVersion) -or
+  ($modelCapabilitiesManifest.dsh.bundle.patch -cne './cordis.patch.yml')) {
+  throw 'model capability Bundle manifest does not match the portable manifest'
+}
 $readme = Get-Content (Join-Path $pkgRoot 'README.txt') -Raw
-$versionLine = "版本：dsh $($manifest.dshVersion) / Node $($manifest.nodeVersion) / Electron $($manifest.electronVersion)"
+$versionLine = "版本：portable $($manifest.portableVersion) / dsh $($manifest.dshVersion) / Node $($manifest.nodeVersion) / Electron $($manifest.electronVersion)"
 if (-not $readme.Contains($versionLine)) { throw 'README.txt does not report the manifest component versions' }
 $noticesPath = Join-Path $pkgRoot 'THIRD_PARTY_NOTICES.md'
 if (-not (Test-Path $noticesPath -PathType Leaf)) { throw 'THIRD_PARTY_NOTICES.md missing' }
@@ -76,7 +111,7 @@ $notices = Get-Content $noticesPath -Raw
 if (-not $notices.Contains('Copyright (c) 2026 DeepSeek') -or -not $notices.Contains('apps/web/public/favicon.svg')) {
   throw 'DeepSeek whale mark source or license notice missing'
 }
-Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2}' -f $manifest.dshVersion, $manifest.nodeVersion, $manifest.electronVersion)
+Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2} / model capabilities {3}' -f $manifest.dshVersion, $manifest.nodeVersion, $manifest.electronVersion, $manifest.modelCapabilitiesVersion)
 
 # ── 3. smoke: boot the app, capture the UI ───────────────────────────────────
 $smoke = Join-Path $WorkDir 'smoke.png'
@@ -93,9 +128,20 @@ try {
   $env:DSH_SMOKE_PROGRESS_OUT = $startupSmoke
   $env:DSH_SMOKE_DELAY_MS = '4000'
   $proc = Start-Process -FilePath $exe -WorkingDirectory $pkgRoot -PassThru
-  if (-not $proc.WaitForExit(150000)) {
-    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-    throw 'smoke timed out after 150s'
+  $smokeTimeoutMs = 270000
+  if (-not $proc.WaitForExit($smokeTimeoutMs)) {
+    $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    $killer = Start-Process -FilePath $taskkill -ArgumentList @('/PID', [string]$proc.Id, '/T', '/F') -WindowStyle Hidden -PassThru
+    $killerTimedOut = -not $killer.WaitForExit(15000)
+    if ($killerTimedOut) {
+      Stop-Process -Id $killer.Id -Force -ErrorAction SilentlyContinue
+      [void]$killer.WaitForExit(5000)
+    }
+    $killerExitCode = if ($killerTimedOut) { -1 } else { $killer.ExitCode }
+    if (-not $proc.HasExited) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue }
+    if (-not $proc.WaitForExit(10000)) { throw 'smoke cleanup could not terminate the desktop process within 10s' }
+    if ($killerExitCode -ne 0) { throw "smoke cleanup could not terminate the complete process tree (taskkill exit $killerExitCode)" }
+    throw 'smoke timed out after 270s'
   }
   if ($proc.ExitCode -ne 0) { throw "smoke exited $($proc.ExitCode); see $pkgRoot\dsh-home\logs\server.log" }
   $img = Get-Item $smoke

@@ -1,0 +1,12 @@
+- insert:
+    - id: model-capabilities
+      name: '@maiziman/dsh-model-capabilities'
+      config:
+        metadataDiscovery: true
+        activeProbePolicy: local-only
+        reasoningProbe: true
+        visionProbe: true
+        reasoningProbeEfforts: [low, high, max]
+        probeConcurrency: 1
+        requestTimeoutMs: 10000
+        probeMaxTokens: 128

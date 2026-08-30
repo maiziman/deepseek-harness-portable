@@ -5,11 +5,13 @@
 
 const https = require('node:https')
 
-const RELEASES_URL = 'https://api.github.com/repos/maiziman/deepseek-harness-portable/releases?per_page=30'
+const RELEASES_URL = 'https://api.github.com/repos/maiziman/deepseek-harness-portable/releases'
 const RELEASE_PATH_PREFIX = '/maiziman/deepseek-harness-portable/releases/'
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 10000
 const MAX_RESPONSE_BYTES = 1024 * 1024
+const RELEASE_PAGE_SIZE = 100
+const MAX_RELEASE_PAGES = 5
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
 const ASSET_PATTERN = /^DeepSeek-Harness-win64-v(.+)\.zip$/u
 
@@ -80,7 +82,7 @@ function compareNumericIdentifiers(left, right) {
  * Determine whether a candidate version is newer than the packaged version.
  *
  * @param {string} candidate Candidate release version.
- * @param {string} current Packaged dsh version.
+ * @param {string} current Packaged portable version.
  * @returns {boolean} Whether the candidate is newer.
  */
 function isNewerVersion(candidate, current) {
@@ -88,6 +90,25 @@ function isNewerVersion(candidate, current) {
   const currentVersion = parseVersion(current)
   if (candidateVersion === null || currentVersion === null) return false
   return compareParsedVersions(candidateVersion, currentVersion) > 0
+}
+
+/**
+ * Resolve the portable release version recorded by a packaged manifest.
+ *
+ * Packages created before portableVersion was introduced used dshVersion as
+ * both the application release version and the upstream dependency version.
+ * A present but malformed portableVersion is rejected instead of hidden by
+ * that legacy fallback.
+ *
+ * @param {unknown} manifest Packaged manifest data.
+ * @returns {string | null} Valid portable version or null.
+ */
+function packagedPortableVersion(manifest) {
+  if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) return null
+  if (Object.prototype.hasOwnProperty.call(manifest, 'portableVersion')) {
+    return parseVersion(manifest.portableVersion) === null ? null : manifest.portableVersion
+  }
+  return parseVersion(manifest.dshVersion) === null ? null : manifest.dshVersion
 }
 
 /**
@@ -107,7 +128,7 @@ function isTrustedReleaseUrl(value) {
 }
 
 /**
- * Read the packaged dsh version represented by a public GitHub Release.
+ * Read the portable version represented by a public GitHub Release.
  *
  * @param {unknown} release GitHub Release response entry.
  * @returns {{version: string, releaseUrl: string, releaseName: string} | null} Valid update metadata.
@@ -122,9 +143,15 @@ function releaseMetadata(release) {
     && typeof asset.name === 'string'
     && ASSET_PATTERN.test(asset.name)
   ))
-  if (checksums.length !== 1 || portableAssets.length !== 1) return null
+  if (release.assets.length !== 2 || checksums.length !== 1 || portableAssets.length !== 1) return null
   const match = ASSET_PATTERN.exec(portableAssets[0].name)
   if (match === null || parseVersion(match[1]) === null) return null
+  if (release.tag_name !== `v${match[1]}`) return null
+  if (new URL(release.html_url).pathname !== `${RELEASE_PATH_PREFIX}tag/v${match[1]}`) return null
+  for (const asset of [portableAssets[0], checksums[0]]) {
+    if (asset.state !== 'uploaded' || !Number.isSafeInteger(asset.size) || asset.size <= 0) return null
+    if (typeof asset.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(asset.digest)) return null
+  }
   return {
     version: match[1],
     releaseUrl: release.html_url,
@@ -152,7 +179,7 @@ function selectLatestRelease(releases) {
 /**
  * Select a public portable release only when it is newer than the package.
  *
- * @param {string} currentVersion Packaged dsh version.
+ * @param {string} currentVersion Packaged portable version.
  * @param {unknown} releases GitHub Releases response.
  * @returns {{version: string, releaseUrl: string, releaseName: string} | null} Available update.
  */
@@ -176,13 +203,14 @@ function shouldCheck(lastCheckedAt, now = Date.now()) {
 }
 
 /**
- * Fetch the public GitHub Releases collection with bounded memory and time.
+ * Fetch one public GitHub Releases page with bounded memory and time.
  *
- * @returns {Promise<unknown>} Parsed GitHub response.
+ * @param {number} page One-based page number.
+ * @returns {Promise<unknown>} Parsed GitHub response page.
  */
-function fetchPublicReleases() {
+function requestReleasePage(page) {
   return new Promise((resolve, reject) => {
-    const request = https.get(RELEASES_URL, {
+    const request = https.get(`${RELEASES_URL}?per_page=${RELEASE_PAGE_SIZE}&page=${page}`, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': 'deepseek-harness-portable-update-check',
@@ -218,12 +246,40 @@ function fetchPublicReleases() {
   })
 }
 
+/**
+ * Collect the bounded public Release pages needed by the update selector.
+ *
+ * @param {(page: number) => Promise<unknown>} fetchPage Release page reader.
+ * @returns {Promise<object[]>} Combined GitHub Release entries.
+ */
+async function collectReleasePages(fetchPage) {
+  const releases = []
+  for (let page = 1; page <= MAX_RELEASE_PAGES; page += 1) {
+    const entries = await fetchPage(page)
+    if (!Array.isArray(entries)) throw new Error(`GitHub Releases page ${page} was not an array`)
+    releases.push(...entries)
+    if (entries.length < RELEASE_PAGE_SIZE) return releases
+  }
+  throw new Error(`GitHub Releases exceeded the ${MAX_RELEASE_PAGES}-page update-check limit`)
+}
+
+/**
+ * Fetch the bounded public GitHub Releases collection.
+ *
+ * @returns {Promise<object[]>} Parsed GitHub Release entries.
+ */
+function fetchPublicReleases() {
+  return collectReleasePages(requestReleasePage)
+}
+
 module.exports = {
   CHECK_INTERVAL_MS,
   availableUpdate,
+  collectReleasePages,
   fetchPublicReleases,
   isNewerVersion,
   isTrustedReleaseUrl,
+  packagedPortableVersion,
   parseVersion,
   selectLatestRelease,
   shouldCheck,

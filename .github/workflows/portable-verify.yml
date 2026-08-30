@@ -11,13 +11,108 @@ name: dsh-portable-verify
 
 on:
   push:
+    branches:
+      - '**'
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  resolve-dsh-version:
+    runs-on: ubuntu-latest
+    outputs:
+      dsh_version: ${{ steps.version.outputs.dsh_version }}
+      portable_version: ${{ steps.version.outputs.portable_version }}
+      previous_portable_tag: ${{ steps.version.outputs.previous_portable_tag }}
+      release_prerelease: ${{ steps.version.outputs.release_prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Test isolated Release staging and publication
+        shell: pwsh
+        run: |
+          & ./.github/scripts/release-scripts.test.ps1
+          & ./.github/scripts/portable-release-policy.test.ps1
+
+      - name: Resolve one exact dsh version for this run
+        id: version
+        shell: pwsh
+        env:
+          CURRENT_TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REF_TYPE: ${{ github.ref_type }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $metadata = Invoke-RestMethod -Uri 'https://registry.npmjs.org/@deepseek-ai/dsh'
+          if ($env:REF_TYPE -eq 'tag') {
+            $version = (Get-Content ./.github/portable-dsh-version.txt -Raw).Trim()
+          } else {
+            $version = [string]$metadata.'dist-tags'.latest
+          }
+          $versionPattern = '^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?<prerelease>(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+          $versionMatch = [regex]::Match($version, $versionPattern)
+          if (-not $versionMatch.Success) { throw "unexpected dsh version: $version" }
+          if (@($metadata.versions.PSObject.Properties.Name) -cnotcontains $version) {
+            throw "exact npm package is unavailable: @deepseek-ai/dsh@$version"
+          }
+          $previousPortableTag = ''
+          $portableVersion = $version
+          $releasePrerelease = $versionMatch.Groups['prerelease'].Success
+          if ($env:REF_TYPE -eq 'tag') {
+            $portableTagPattern = '^v(?<version>' + $versionPattern.Substring(1, $versionPattern.Length - 2) + ')$'
+            $currentMatch = [regex]::Match($env:CURRENT_TAG, $portableTagPattern)
+            if (-not $currentMatch.Success) { throw "invalid portable tag: $env:CURRENT_TAG" }
+            $portableVersion = [string]$currentMatch.Groups['version'].Value
+            $releasePrerelease = $releasePrerelease -or $currentMatch.Groups['prerelease'].Success
+            $currentVersion = [System.Management.Automation.SemanticVersion]::Parse($portableVersion)
+            $headers = @{
+              Accept = 'application/vnd.github+json'
+              Authorization = "Bearer $env:GH_TOKEN"
+              'X-GitHub-Api-Version' = '2022-11-28'
+            }
+            . ./.github/scripts/portable-release-policy.ps1
+            $portableMarkerPattern = '(?m)^<!-- portable-version: (?<version>' + $versionPattern.Substring(1, $versionPattern.Length - 2) + ') -->\r?$'
+            $legacyPortableTags = @('v1.0.0', 'v1.1.0', 'v1.2.0')
+            $earlierReleases = @()
+            for ($page = 1; ; $page++) {
+              $releaseResponse = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/$env:REPOSITORY/releases?per_page=100&page=$page"
+              $pageReleases = @($releaseResponse | ForEach-Object { $_ })
+              foreach ($release in $pageReleases) {
+                if ([bool]$release.draft) { continue }
+                $match = [regex]::Match([string]$release.tag_name, $portableTagPattern)
+                if (-not $match.Success) { continue }
+                $assetState = Get-DshPortableAssetState -Release $release
+                if ($null -eq $assetState) { continue }
+                $tagVersion = [string]$match.Groups['version'].Value
+                $markerMatch = [regex]::Match([string]$release.body, $portableMarkerPattern)
+                if ($markerMatch.Success) {
+                  if ([string]$markerMatch.Groups['version'].Value -cne $tagVersion -or $assetState.Version -cne $tagVersion) { continue }
+                } elseif ([string]$release.tag_name -notin $legacyPortableTags) {
+                  continue
+                }
+                $parsed = [System.Management.Automation.SemanticVersion]::Parse($match.Groups['version'].Value)
+                if ($parsed -lt $currentVersion) {
+                  $earlierReleases += [pscustomobject]@{ Name = [string]$release.tag_name; Parsed = $parsed }
+                }
+              }
+              if ($pageReleases.Count -lt 100) { break }
+            }
+            $previous = @($earlierReleases | Sort-Object Parsed -Descending | Select-Object -First 1)
+            if ($previous.Count -eq 1) { $previousPortableTag = $previous[0].Name }
+          }
+          "dsh_version=$version" >> $env:GITHUB_OUTPUT
+          "portable_version=$portableVersion" >> $env:GITHUB_OUTPUT
+          "previous_portable_tag=$previousPortableTag" >> $env:GITHUB_OUTPUT
+          "release_prerelease=$($releasePrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
   build-and-verify:
+    needs: resolve-dsh-version
     strategy:
       fail-fast: false
       matrix:
@@ -30,25 +125,41 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test desktop shell logic
+      - name: Test desktop shell and capability plugin
         shell: pwsh
         run: |
-          node --test .\shell\startup-progress.test.js .\shell\update.test.js
+          node --test .\shell\startup-progress.test.js .\shell\update.test.js .\shell\launch-args.test.js .\shell\process-lifecycle.test.js
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Push-Location .\plugins\dsh-model-capabilities
+          try {
+            node --test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            npm pack --dry-run
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
 
       - name: Build portable package
         shell: pwsh
+        env:
+          DSH_VERSION: ${{ needs.resolve-dsh-version.outputs.dsh_version }}
+          PORTABLE_VERSION: ${{ needs.resolve-dsh-version.outputs.portable_version }}
         run: |
-          .\build-portable.ps1 -ElectronMirror github
+          .\build-portable.ps1 -DshVersion $env:DSH_VERSION -PortableVersion $env:PORTABLE_VERSION -ElectronMirror github
 
       - name: Verify package (compatibility probe)
         shell: pwsh
+        env:
+          DSH_VERSION: ${{ needs.resolve-dsh-version.outputs.dsh_version }}
+          PORTABLE_VERSION: ${{ needs.resolve-dsh-version.outputs.portable_version }}
         run: |
-          .\verify-package.ps1
+          .\verify-package.ps1 -ExpectedDshVersion $env:DSH_VERSION -ExpectedPortableVersion $env:PORTABLE_VERSION
 
       - name: Upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dsh-portable-${{ matrix.os }}
+          name: dsh-portable-${{ matrix.os }}-${{ needs.resolve-dsh-version.outputs.portable_version }}
           path: |
             dist/*.zip
             dist/SHA256SUMS.txt
@@ -57,7 +168,7 @@ jobs:
       - name: Upload verification screenshots
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dsh-portable-ui-${{ matrix.os }}
+          name: dsh-portable-ui-${{ matrix.os }}-${{ needs.resolve-dsh-version.outputs.portable_version }}
           path: |
             .build/startup-progress.png
             .build/smoke.png
@@ -65,11 +176,11 @@ jobs:
           retention-days: 14
 
   publish-tag-release:
-    needs: build-and-verify
+    needs: [resolve-dsh-version, build-and-verify]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     concurrency:
-      group: dsh-tag-release-${{ github.ref }}
+      group: dsh-portable-release-publication
       cancel-in-progress: false
     permissions:
       contents: write
@@ -81,58 +192,81 @@ jobs:
       - name: Download the Windows 2025 verified package
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
-          name: dsh-portable-windows-2025
+          name: dsh-portable-windows-2025-${{ needs.resolve-dsh-version.outputs.portable_version }}
           path: release-assets
 
       - name: Resolve release asset name
         id: asset
         shell: pwsh
+        env:
+          PORTABLE_VERSION: ${{ needs.resolve-dsh-version.outputs.portable_version }}
         run: |
-          $zips = @(Get-ChildItem release-assets -File -Filter 'DeepSeek-Harness-*.zip')
-          if ($zips.Count -ne 1) { throw "expected one release ZIP, found $($zips.Count)" }
-          "zip_name=$($zips[0].Name)" >> $env:GITHUB_OUTPUT
+          $expected = "DeepSeek-Harness-win64-v$env:PORTABLE_VERSION.zip"
+          $zips = @(Get-ChildItem release-assets -File -Filter '*.zip')
+          if ($zips.Count -ne 1 -or $zips[0].Name -cne $expected) {
+            throw "expected exactly $expected, found: $($zips.Name -join ', ')"
+          }
+          "zip_name=$expected" >> $env:GITHUB_OUTPUT
 
-      - name: Check whether the Release is safe to stage
-        id: preflight
+      - name: Stage verified Draft Release by exact id
+        id: stage
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           ZIP_NAME: ${{ steps.asset.outputs.zip_name }}
-        run: |
-          ./.github/scripts/finalize-release.ps1 `
-            -Repository $env:REPOSITORY `
-            -Tag $env:RELEASE_TAG `
-            -ZipName $env:ZIP_NAME `
-            -Preflight
+          TARGET_COMMIT: ${{ github.sha }}
+          PREVIOUS_TAG: ${{ needs.resolve-dsh-version.outputs.previous_portable_tag }}
+          PRERELEASE: ${{ needs.resolve-dsh-version.outputs.release_prerelease }}
+          PORTABLE_VERSION: ${{ needs.resolve-dsh-version.outputs.portable_version }}
+          DSH_VERSION: ${{ needs.resolve-dsh-version.outputs.dsh_version }}
+          RELEASE_BODY: |
+            <!-- portable-version: ${{ needs.resolve-dsh-version.outputs.portable_version }} -->
+            <!-- dsh-version: ${{ needs.resolve-dsh-version.outputs.dsh_version }} -->
+            Portable release `v${{ needs.resolve-dsh-version.outputs.portable_version }}` packages official `@deepseek-ai/dsh@${{ needs.resolve-dsh-version.outputs.dsh_version }}`.
 
-      - name: Stage verified Draft Release
-        id: stage
-        if: steps.preflight.outputs.should_stage == 'true'
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
-        with:
-          files: |
-            release-assets/DeepSeek-Harness-*.zip
-            release-assets/SHA256SUMS.txt
-          draft: true
-          generate_release_notes: true
+            The attached package passed clean builds and real UI boot probes on Windows Server 2022 and 2025. Verify the ZIP against `SHA256SUMS.txt` before use.
+        run: |
+          $stage = @{
+            Repository = $env:REPOSITORY
+            Tag = $env:RELEASE_TAG
+            PackageName = $env:ZIP_NAME
+            TargetCommitish = $env:TARGET_COMMIT
+            Prerelease = $env:PRERELEASE
+            ReleaseName = "DeepSeek Harness Portable v$env:PORTABLE_VERSION (DSH $env:DSH_VERSION)"
+            Body = $env:RELEASE_BODY
+          }
+          if ($env:PREVIOUS_TAG) {
+            $stage.PreviousTagName = $env:PREVIOUS_TAG
+            $stage.GenerateReleaseNotes = $true
+            $stage.AppendGeneratedReleaseNotes = $true
+          }
+          & ./.github/scripts/stage-release.ps1 @stage
 
       - name: Validate assets and publish Release
-        if: steps.preflight.outputs.should_stage == 'true'
+        if: steps.stage.outputs.should_publish == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           RELEASE_TAG: ${{ github.ref_name }}
           ZIP_NAME: ${{ steps.asset.outputs.zip_name }}
-          RELEASE_ID: ${{ steps.stage.outputs.id }}
+          DRAFT_TAG: ${{ steps.stage.outputs.draft_tag }}
+          EXPECTED_COMMIT: ${{ github.sha }}
+          EXPECTED_BODY_SHA256: ${{ steps.stage.outputs.body_sha256 }}
+          PRERELEASE: ${{ needs.resolve-dsh-version.outputs.release_prerelease }}
+          RELEASE_ID: ${{ steps.stage.outputs.release_id }}
         run: |
           ./.github/scripts/finalize-release.ps1 `
             -Repository $env:REPOSITORY `
             -Tag $env:RELEASE_TAG `
-            -ZipName $env:ZIP_NAME `
-            -ReleaseId $env:RELEASE_ID
+            -PackageName $env:ZIP_NAME `
+            -DraftTag $env:DRAFT_TAG `
+            -ExpectedCommit $env:EXPECTED_COMMIT `
+            -ExpectedBodySha256 $env:EXPECTED_BODY_SHA256 `
+            -ReleaseId $env:RELEASE_ID `
+            -Prerelease $env:PRERELEASE
 
   # Lightweight cross-OS sanity was considered here; it requires multi-platform
   # packaging (Node runtime + Electron for darwin/linux) in build-portable.ps1.

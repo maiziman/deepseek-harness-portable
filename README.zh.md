@@ -44,8 +44,9 @@
 | **真正便携** | 设置、会话、插件和日志都在程序旁的 `dsh-home` 中；整个文件夹可一起移动和备份。 |
 | **发布可验证** | Node.js 下载会与官方 SHA256 文件核对；每个包记录精确组件版本，并随 Release 提供校验和。 |
 | **全新系统验证** | 每次推送都在全新的 Windows Server 2022 和 2025 GitHub runner 上完成构建与真实启动。 |
-| **自动跟进官方版本** | 每六小时检查一次官方 dsh 版本；只有两个 Windows 任务和暂存的 Release 附件都通过验证，才会自动公开。 |
+| **自动跟进官方版本** | 每六小时检查最高的官方 `dsh-v*` 标签；对应的精确 npm 包发布后，验证通过的构建会获得下一个项目 `v<便携版本>`，ZIP 使用同一编号。 |
 | **主动提示更新** | 桌面程序每天最多检查一次已公开的 GitHub Release，发现新版后先询问，再打开经过验证的下载页面；不会静默替换文件。 |
+| **自定义模型能力识别** | 内置的独立插件会读取思考和图像输入元数据；局域网端点信息不足时，可通过有明确上限的后台请求验证能力，无需改动官方 dsh 适配器。 |
 
 ### 便携 ZIP 还是官方 npm 安装？
 
@@ -61,8 +62,11 @@
 - **系统：** Windows 10 21H2 或更高版本、Windows 11，x64 架构。
 - **权限：** 无需管理员权限；界面和服务仅在本机运行。
 - **包内内容：** 官方 Node.js 运行时、已发布的 `@deepseek-ai/dsh` 包、生产依赖和 Electron 桌面壳。
+- **能力插件：** 启动器会在需要时通过官方 `dsh plugin` 流程登记内置的 [`@maiziman/dsh-model-capabilities`](plugins/dsh-model-capabilities/README.zh.md) Bundle。它只补充缺失的自定义模型字段，不根据模型名称猜测，默认也不会对公网端点发起主动推理请求。
 - **验证方式：** 先用 `SHA256SUMS.txt` 核对 ZIP，再运行 `verify-package.ps1` 完成真实启动和 UI 渲染探测。
 - **当前成熟度：** DeepSeek Harness 0.1 仍是面向 Harness 开发者的预览版，界面、插件和 API 会持续快速演化。
+
+便携 ZIP 已经内置能力插件。使用官方 npm 安装方式的用户可从[模型能力插件 v0.1.0 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.0)单独添加；插件 Release 使用自己的校验和与版本周期，不会取代便携版的最新下载入口。
 
 完整的构建流程、版本固定、验证矩阵和发布方式见[构建与验证](docs/BUILDING.zh.md)。
 
@@ -73,7 +77,7 @@
 .\build-portable.ps1
 ```
 
-命令会生成 `dist\DeepSeek-Harness-win64-v<dsh版本>.zip` 与 `dist\SHA256SUMS.txt`。下载的 Node.js 运行时必须通过官方校验后才会进入产物。
+命令会生成 `dist\DeepSeek-Harness-win64-v<便携版本>.zip` 与 `dist\SHA256SUMS.txt`。`manifest.json` 会分别记录便携版本和包内官方 dsh 版本；下载的 Node.js 运行时必须通过官方校验后才会进入产物。
 
 ## 常见问题
 
@@ -94,14 +98,14 @@
 <details>
 <summary><strong>能从命令行使用吗？</strong></summary>
 
-可以。运行 `dsh.cmd web` 打开 Web UI，或用 `dsh.cmd --profile headless "任务"` 执行无界面任务。
+可以。运行 `dsh.cmd web` 打开 Web UI，或用 `dsh.cmd --profile headless "任务"` 执行无界面任务。这个命令行入口会直接启动官方 CLI，不会执行桌面启动器的插件登记流程。如果希望 Web profile 使用内置的模型能力插件，请先启动一次 `DeepSeek-Harness.exe`；headless profile 默认保持官方原样，只有手动执行 `dsh.cmd plugin --profile headless add <插件.tgz或目录>` 后才会加载该插件。
 
 </details>
 
 <details>
 <summary><strong>程序如何检查更新？</strong></summary>
 
-程序每 24 小时最多检查一次本仓库已经公开的 Release。发现更高版本时，会显示当前和新版 dsh 版本，由你决定是否打开下载页。程序不会自动下载或覆盖文件；请核对 Release 校验和、关闭程序、解压新包，并保留 `dsh-home` 和 `workspace`。如需禁用检查，可在启动前设置 `DSH_UPDATE_CHECK=0`。
+程序每 24 小时最多检查一次本仓库已经公开的 Release。发现更高版本时，会显示当前和新版便携版本，由你决定是否打开下载页。程序不会自动下载或覆盖文件；请核对 Release 校验和、关闭程序、解压新包，并保留 `dsh-home` 和 `workspace`。程序也兼容尚未单独记录便携版本的旧包。如需禁用检查，可在启动前设置 `DSH_UPDATE_CHECK=0`。
 
 </details>
 
