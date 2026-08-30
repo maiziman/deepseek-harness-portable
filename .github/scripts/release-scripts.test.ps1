@@ -29,6 +29,7 @@ $global:DshReleaseScriptsTestApi = [pscustomobject]@{
   DeleteCalls = 0
   FailUploadCall = 0
   LatestId = ''
+  MissingCommitError = ''
   NextAssetId = 500
   NextReleaseId = 100
   OutputIndex = 0
@@ -75,21 +76,35 @@ function Assert-Throws {
     $caught = $_
   }
   if ($null -eq $caught) { throw "expected failure matching: $MessagePattern" }
-  if ([string]$caught.Exception.Message -notlike $MessagePattern) {
-    throw "unexpected failure '$($caught.Exception.Message)'; expected: $MessagePattern"
+  $errorDetail = if ($null -ne $caught.ErrorDetails) { [string]$caught.ErrorDetails.Message } else { '' }
+  $errorText = @([string]$caught.Exception.Message, $errorDetail) -join "`n"
+  if ($errorText -notlike $MessagePattern) {
+    throw "unexpected failure '$errorText'; expected: $MessagePattern"
   }
 }
 
 function New-MockHttpException {
   param(
     [Parameter(Mandatory)][int]$StatusCode,
-    [Parameter(Mandatory)][string]$Message
+    [Parameter(Mandatory)][string]$Message,
+    [switch]$UseErrorDetails
   )
 
-  $exception = [Exception]::new($Message)
+  $exceptionMessage = if ($UseErrorDetails) { "HTTP request failed with status $StatusCode" } else { $Message }
+  $exception = [Exception]::new($exceptionMessage)
   $exception | Add-Member -NotePropertyName Response -NotePropertyValue ([pscustomobject]@{
       StatusCode = $StatusCode
     })
+  if ($UseErrorDetails) {
+    $record = [System.Management.Automation.ErrorRecord]::new(
+      $exception,
+      'MockHttp',
+      [System.Management.Automation.ErrorCategory]::InvalidOperation,
+      $null
+    )
+    $record.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($Message)
+    return $record
+  }
   return $exception
 }
 
@@ -278,7 +293,12 @@ function Invoke-RestMethod {
       $tag = [uri]::UnescapeDataString($Matches.tag)
       $global:DshReleaseScriptsTestApi.CommitLookups.Add($tag)
       if (-not $global:DshReleaseScriptsTestApi.Refs.ContainsKey($tag)) {
-        throw (New-MockHttpException -StatusCode 404 -Message "tag not found: $tag")
+        $message = if ($global:DshReleaseScriptsTestApi.MissingCommitError) {
+          [string]$global:DshReleaseScriptsTestApi.MissingCommitError
+        } else {
+          "No commit found for SHA: $tag"
+        }
+        throw (New-MockHttpException -StatusCode 422 -Message $message -UseErrorDetails)
       }
       return [pscustomobject]@{ sha = $global:DshReleaseScriptsTestApi.Refs[$tag] }
     }
@@ -442,6 +462,21 @@ try {
     -ValidateOnly | Out-Null
   Assert-Equal $writesBeforeValidation $global:DshReleaseScriptsTestApi.ClientWrites 'ValidateOnly must not call GitHub'
   Write-Output 'PASS local ValidateOnly is keyless and read-only'
+
+  $global:DshReleaseScriptsTestApi.MissingCommitError = 'Validation Failed'
+  try {
+    Assert-Throws -MessagePattern '*Validation Failed*' -Action {
+      & $stageScript `
+        -Repository 'owner/repository' `
+        -Tag 'plugin-v-unrelated-422' `
+        -PackageName $packageName `
+        -AssetsDir $fixtureRoot `
+        -TargetCommitish $expectedCommit | Out-Null
+    }
+  } finally {
+    $global:DshReleaseScriptsTestApi.MissingCommitError = ''
+  }
+  Write-Output 'PASS an unrelated commit lookup 422 is not classified as a missing tag'
 
   $latest = Add-CompleteMockRelease `
     -Tag 'v-portable-latest' `

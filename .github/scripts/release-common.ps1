@@ -182,7 +182,15 @@ function Get-DshTagCommitSha {
     $commit = Invoke-RestMethod -Headers $Headers -Uri "https://api.github.com/repos/$Repository/commits/$escapedTag"
   } catch {
     $statusCode = if ($null -ne $_.Exception.Response) { $_.Exception.Response.StatusCode } else { $null }
-    if ($null -ne $statusCode -and [int]$statusCode -eq 404) { return $null }
+    $errorDetail = if ($null -ne $_.ErrorDetails) { [string]$_.ErrorDetails.Message } else { '' }
+    $errorText = @([string]$_.Exception.Message, $errorDetail) -join "`n"
+    $missingCommitMessage = "No commit found for SHA: $Tag"
+    # Unlike the ref and Release endpoints, commits/{ref} reports a missing
+    # ref as this exact 422 response rather than 404.
+    if ($null -ne $statusCode -and (
+        [int]$statusCode -eq 404 -or
+        ([int]$statusCode -eq 422 -and $errorText.Contains($missingCommitMessage, [StringComparison]::Ordinal))
+      )) { return $null }
     throw
   }
   $sha = ([string]$commit.sha).ToLowerInvariant()
