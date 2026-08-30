@@ -1,6 +1,6 @@
 # DSH Custom API Capabilities
 
-[Download v0.1.1](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) · [中文](README.zh.md)
+[Download v0.1.2](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2) · [中文](README.zh.md)
 
 **Automatically detects reasoning levels and image input for OpenAI-compatible custom models—without patching DSH or overriding explicit settings.**
 
@@ -26,10 +26,10 @@ Public endpoints receive metadata requests only by default. This avoids silent b
 
 ## Install
 
-No DeepSeek Harness Pure Portable ZIP bundles or automatically installs this plugin. Download the versioned tarball and checksum from the [DSH Custom API Capabilities v0.1.1 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1), then verify and install it with the official Bundle workflow:
+No DeepSeek Harness Pure Portable ZIP bundles or automatically installs this plugin. Download the versioned tarball and checksum from the [DSH Custom API Capabilities v0.1.2 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2), then verify and install it with the official Bundle workflow:
 
 ```powershell
-$version = '0.1.1'
+$version = '0.1.2'
 $package = "maiziman-dsh-model-capabilities-$version.tgz"
 $release = "https://github.com/maiziman/deepseek-harness-portable/releases/download/plugin-model-capabilities-v$version"
 Invoke-WebRequest "$release/$package" -OutFile $package
@@ -110,7 +110,8 @@ The test suite covers metadata formats, local-network classification, positive-e
 | DeepSeek Harness | Verification |
 |---|---|
 | `0.1.1-rc.2` | Official Bundle registration, profile boot, settings mutation, and packaged-runtime tests. |
-| `0.1.2-alpha.1` (`cd5ef814`) | Clean install of this final `.tgz` through the exact tagged source's official `dsh plugin` command, complete `--dump-config`, profile boot, Settings/Credentials API review, update-event timing regression, and layered `compat` regression. |
+| `0.1.2-alpha.1` (`cd5ef814`) | Clean install of the v0.1.1 Release tarball through the exact tagged source's official `dsh plugin` command, complete `--dump-config`, profile boot, Settings/Credentials API review, update-event timing regression, and layered `compat` regression. |
+| `0.1.2-alpha.2` (`0a53fb55`) | Clean install of this v0.1.2 tarball, complete profile boot, and real local OpenAI-compatible model discovery for image input, reasoning efforts, and `compat.thinkingFormat`. |
 
 Every plugin Release tag repeats the clean official-source install, expanded-config check, and Web-profile boot against the exact tag, commit, and hash-pinned pnpm version in [`.github/plugin-compatibility.json`](../../.github/plugin-compatibility.json). Immediately before Draft creation and again before publication, it resolves the official tag and requires the same commit. It also builds a pure portable ZIP, rejects any ZIP that already contains the plugin, and installs the exact plugin candidate through that ZIP in offline mode without relying on global pnpm or Corepack caches. The Release is not published if any gate fails.
 

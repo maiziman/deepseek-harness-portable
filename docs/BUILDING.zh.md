@@ -19,8 +19,8 @@
 |---|---|
 | `-DshVersion 0.1.1-rc.2` | 已发布的 `@deepseek-ai/dsh` 版本；默认取 npm 最新版。 |
 | `-DshPackageDirectory C:\Build\dsh-packages` | 可选的完整包集合，由精确官方 `dsh-v*` 标签暂存而来；不提供时从 npm 安装 `@deepseek-ai/dsh`。 |
-| `-DshSourceTag dsh-v0.1.2-alpha.1` | 记录在暂存包来源信息中并与其核对的精确官方源码标签；使用 `-DshPackageDirectory` 时必须提供。 |
-| `-DshSourceSha cd5ef814...` | 官方源码标签对应的完整 40 位提交；使用 `-DshPackageDirectory` 时必须提供。 |
+| `-DshSourceTag dsh-v0.1.2-alpha.2` | 记录在暂存包来源信息中并与其核对的精确官方源码标签；使用 `-DshPackageDirectory` 时必须提供。 |
+| `-DshSourceSha 0a53fb55...` | 官方源码标签对应的完整 40 位提交；使用 `-DshPackageDirectory` 时必须提供。 |
 | `-PortableVersion 1.2.1` | 项目发布版本，用于标签、ZIP、Electron 元数据、manifest 和更新比较；无标签的本地构建默认与 dsh 版本相同。 |
 | `-NodeVersion v24.19.0` | 满足 dsh engines 要求的官方 Node.js 版本。 |
 | `-ElectronVersion 44.0.0` | Electron 运行时版本。 |
@@ -36,11 +36,11 @@
 
 ```powershell
 .\build-portable.ps1 `
-  -DshVersion 0.1.2-alpha.1 `
+  -DshVersion 0.1.2-alpha.2 `
   -PortableVersion 1.2.1 `
   -DshPackageDirectory C:\Build\dsh-packages `
-  -DshSourceTag dsh-v0.1.2-alpha.1 `
-  -DshSourceSha cd5ef8148158c3a752a658978873241fdf8e2bbc
+  -DshSourceTag dsh-v0.1.2-alpha.2 `
+  -DshSourceSha 0a53fb55bea101816fa226bb964ae2bed71c343b
 ```
 
 ## 组装流程
@@ -79,7 +79,7 @@ build-portable.ps1
 
 ```powershell
 .\verify-package.ps1
-.\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v1.2.1.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.1
+.\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v1.2.1.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.2
 ```
 
 如果图标母版不同时包含透明和不透明像素、ICO 不是由 16、20、24、32、40、48、64、128 和 256 px 共 9 档 RGBA PNG 组成，或最终 EXE 的 PE 图标组与任一源图帧不同，构建都会终止。压缩前，构建会对真实仓库、构建专用 scratch、runner 工作区与包输入路径执行完整的二进制敏感扫描。扫描不会把电脑级用户主目录或临时目录前缀本身判为泄漏，因为第三方原生二进制可能合法保留其上游构建使用的通用前缀。验证探针还会检查唯一顶层目录、启动前没有 reparse point、`dsh-home` 为空、解压完整性、第三方声明、manifest 与 Node.js/pnpm 版本、规范 lock 与运行图哈希、EXE 产品名和原文件名、生成文件中没有绝对路径注释、包管理器状态与默认插件缺失、真实服务启动、URL 发现、干净退出和首次 profile 初始化。它同时捕获界面截图与机器可读的启动证据，证明实际显示的组件分子和分母来自包内链接，并与 manifest 总数一致。

@@ -31,7 +31,7 @@ DeepSeek Harness 纯净便携桌面版（Windows x64）
 四、可选插件
 默认 ZIP 不含插件。DSH 自定义 API 能力识别插件可识别 OpenAI-compatible 自定义模型的思考等级与图像输入能力，始终保留明确设置，默认不对公网端点发起主动推理请求。
 安装包、校验和与说明：
-https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1
+https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2
 
 五、命令行用法（可选）
 在文件夹内打开 cmd 后运行：

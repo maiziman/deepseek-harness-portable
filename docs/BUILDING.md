@@ -19,8 +19,8 @@ This reference describes how the portable ZIP is assembled, verified, and publis
 |---|---|
 | `-DshVersion 0.1.1-rc.2` | Published `@deepseek-ai/dsh` version; defaults to npm latest. |
 | `-DshPackageDirectory C:\Build\dsh-packages` | Optional complete package set staged from an exact official `dsh-v*` tag; without it, the build installs `@deepseek-ai/dsh` from npm. |
-| `-DshSourceTag dsh-v0.1.2-alpha.1` | Exact official source tag recorded in and checked against the staged package provenance; required with `-DshPackageDirectory`. |
-| `-DshSourceSha cd5ef814...` | Full 40-character commit for the official source tag; required with `-DshPackageDirectory`. |
+| `-DshSourceTag dsh-v0.1.2-alpha.2` | Exact official source tag recorded in and checked against the staged package provenance; required with `-DshPackageDirectory`. |
+| `-DshSourceSha 0a53fb55...` | Full 40-character commit for the official source tag; required with `-DshPackageDirectory`. |
 | `-PortableVersion 1.2.1` | Project release version used by the tag, ZIP, Electron metadata, manifest, and update comparison; defaults to the dsh version for untagged local builds. |
 | `-NodeVersion v24.19.0` | Official Node.js version satisfying the dsh engine requirement. |
 | `-ElectronVersion 44.0.0` | Electron runtime version. |
@@ -36,11 +36,11 @@ The read-only source job then maps every packed runtime package back to its veri
 
 ```powershell
 .\build-portable.ps1 `
-  -DshVersion 0.1.2-alpha.1 `
+  -DshVersion 0.1.2-alpha.2 `
   -PortableVersion 1.2.1 `
   -DshPackageDirectory C:\Build\dsh-packages `
-  -DshSourceTag dsh-v0.1.2-alpha.1 `
-  -DshSourceSha cd5ef8148158c3a752a658978873241fdf8e2bbc
+  -DshSourceTag dsh-v0.1.2-alpha.2 `
+  -DshSourceSha 0a53fb55bea101816fa226bb964ae2bed71c343b
 ```
 
 ## Assembly pipeline
@@ -79,7 +79,7 @@ The packaged desktop app reads only complete published Releases whose strict `v<
 
 ```powershell
 .\verify-package.ps1
-.\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v1.2.1.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.1
+.\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v1.2.1.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.2
 ```
 
 The build rejects an icon master without transparent and opaque pixels, an ICO without exactly 16, 20, 24, 32, 40, 48, 64, 128, and 256 px RGBA PNG frames, or a packaged EXE whose PE icon group differs from any source frame. Before compression, the build performs the full binary-sensitive scan for the actual repository, build-owned scratch, runner workspace, and package-input paths. It intentionally does not reject a machine-wide user-home or temporary-directory prefix because a third-party native binary can legitimately retain that generic prefix from its own upstream build. The verification probe checks a single top-level directory, absence of pre-launch reparse points, an empty `dsh-home`, extraction completeness, third-party notices, manifest and Node.js/pnpm runtime versions, the canonical-lock and runtime-map hashes, PE product and filename metadata, absence of generated absolute-path annotations, package-manager state, and default plugins, a real server boot, URL discovery, clean shutdown, and first-run profile initialization. It captures both UI images and machine-readable startup evidence proving that the rendered component numerator and denominator came from package-owned links and match the manifest total.

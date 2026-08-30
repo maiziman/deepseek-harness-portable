@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/maiziman/deepseek-harness-portable/releases/latest"><strong>Download the latest ZIP</strong></a>
-  · <a href="https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1"><strong>Get the optional Custom API plugin</strong></a>
+  · <a href="https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2"><strong>Get the optional Custom API plugin</strong></a>
   · <a href="README.zh.md">中文说明</a>
 </p>
 
@@ -67,7 +67,7 @@ No Node.js, installer, or administrator access is required. No API key is bundle
 
 [`DSH Custom API Capabilities`](plugins/dsh-model-capabilities/README.md) is a separate, opt-in Bundle for OpenAI-compatible custom models. It detects supported reasoning levels and image input, preserves every explicit model setting, and does not make active inference requests to public endpoints by default.
 
-Download the independently versioned package and checksum from the [DSH Custom API Capabilities v0.1.1 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1). Installing or updating a portable ZIP never installs this plugin for you.
+Download the independently versioned package and checksum from the [DSH Custom API Capabilities v0.1.2 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2). Installing or updating a portable ZIP never installs this plugin for you.
 
 ## Compatibility and verification
 

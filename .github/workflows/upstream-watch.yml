@@ -446,7 +446,7 @@ jobs:
 
             Download `${{ needs.detect.outputs.asset_name }}`, extract it, and double-click `DeepSeek-Harness.exe`. No Node.js, installer, or administrator access is required. This community wrapper adds the Windows runtime, desktop window, portable data directory, and an opt-in update notice; it does not include or auto-install plugins. Packaging only normalizes non-executable generated comments that contain build-machine paths.
 
-            The ZIP passed clean builds and real UI boot probes on Windows Server 2022 and 2025. Verify it against `SHA256SUMS.txt`. The optional [DSH Custom API Capabilities plugin](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) has its own Release and lifecycle.
+            The ZIP passed clean builds and real UI boot probes on Windows Server 2022 and 2025. Verify it against `SHA256SUMS.txt`. The optional [DSH Custom API Capabilities plugin](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2) has its own Release and lifecycle.
         run: |
           if ([bool]$env:PREVIOUS_TAG -ne [bool]$env:PREVIOUS_SHA) {
             throw 'previous portable tag and commit must be supplied together'

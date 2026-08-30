@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="https://github.com/maiziman/deepseek-harness-portable/releases/latest"><strong>下载最新 ZIP</strong></a>
-  · <a href="https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1"><strong>获取可选的自定义 API 插件</strong></a>
+  · <a href="https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2"><strong>获取可选的自定义 API 插件</strong></a>
   · <a href="README.md">English</a>
 </p>
 
@@ -67,7 +67,7 @@
 
 [`DSH 自定义 API 能力识别插件`](plugins/dsh-model-capabilities/README.zh.md) 是面向 OpenAI-compatible 自定义模型的独立可选 Bundle。它会识别支持的思考等级与图像输入能力，保留用户明确设置的每个值，默认不对公网端点发起主动推理请求。
 
-请从 [DSH 自定义 API 能力识别插件 v0.1.1 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) 下载独立版本的安装包与校验和。安装或更新便携 ZIP 不会替你安装这个插件。
+请从 [DSH 自定义 API 能力识别插件 v0.1.2 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2) 下载独立版本的安装包与校验和。安装或更新便携 ZIP 不会替你安装这个插件。
 
 ## 兼容性与验证
 

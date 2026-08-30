@@ -12,7 +12,7 @@
 # Usage:
 #   .\verify-package.ps1                       # newest zip in dist\
 #   .\verify-package.ps1 -ZipPath X.zip        # specific package
-#   .\verify-package.ps1 -ZipPath X.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.1
+#   .\verify-package.ps1 -ZipPath X.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.2
 #   .\verify-package.ps1 -Keep                 # keep the extracted tree
 #requires -Version 7.2
 [CmdletBinding()]

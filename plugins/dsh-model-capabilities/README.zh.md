@@ -1,6 +1,6 @@
 # DSH 自定义 API 能力识别插件
 
-[下载 v0.1.1](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) · [English](README.md)
+[下载 v0.1.2](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2) · [English](README.md)
 
 **自动识别 OpenAI-compatible 自定义模型支持的思考等级与图像输入能力，不修改 DSH，也不覆盖明确设置。**
 
@@ -26,10 +26,10 @@
 
 ## 安装
 
-DeepSeek Harness 纯净便携 ZIP 不内置、也不会自动安装这个插件。请从 [DSH 自定义 API 能力识别插件 v0.1.1 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) 下载带版本号的压缩包与校验和，再通过官方 Bundle 流程核验并安装：
+DeepSeek Harness 纯净便携 ZIP 不内置、也不会自动安装这个插件。请从 [DSH 自定义 API 能力识别插件 v0.1.2 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2) 下载带版本号的压缩包与校验和，再通过官方 Bundle 流程核验并安装：
 
 ```powershell
-$version = '0.1.1'
+$version = '0.1.2'
 $package = "maiziman-dsh-model-capabilities-$version.tgz"
 $release = "https://github.com/maiziman/deepseek-harness-portable/releases/download/plugin-model-capabilities-v$version"
 Invoke-WebRequest "$release/$package" -OutFile $package
@@ -110,7 +110,8 @@ npm pack --dry-run
 | DeepSeek Harness | 验证方式 |
 |---|---|
 | `0.1.1-rc.2` | 官方 Bundle 登记、profile 启动、设置写入与成品运行时测试。 |
-| `0.1.2-alpha.1`（`cd5ef814`） | 使用该精确源码标签的官方 `dsh plugin` 命令在全新环境安装最终 `.tgz`，完成完整 `--dump-config`、profile 启动、Settings/Credentials API 审查、更新事件时序回归与分层 `compat` 回归。 |
+| `0.1.2-alpha.1`（`cd5ef814`） | 使用该精确源码标签的官方 `dsh plugin` 命令全新安装 v0.1.1 Release 压缩包，完成完整 `--dump-config`、profile 启动、Settings/Credentials API 审查、更新事件时序回归与分层 `compat` 回归。 |
+| `0.1.2-alpha.2`（`0a53fb55`） | 全新安装本 v0.1.2 压缩包，完成完整 profile 启动，并通过真实本地 OpenAI-compatible 模型识别图像输入、思考等级与 `compat.thinkingFormat`。 |
 
 每个插件 Release 标签都会按照 [`.github/plugin-compatibility.json`](../../.github/plugin-compatibility.json) 中固定的官方标签、提交和哈希固定的 pnpm 版本，重新执行全新安装、展开配置检查和 Web profile 启动。创建 Draft 前与正式公开前都会重新解析官方标签，并要求它仍指向同一提交。流程还会构建纯净便携 ZIP，拒绝任何已经内置该插件的 ZIP，然后在不依赖全局 pnpm 或 Corepack 缓存的环境中，通过该 ZIP 以离线模式安装精确插件候选；任一道验证失败都不会公开 Release。
 
