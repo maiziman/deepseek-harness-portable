@@ -1,10 +1,20 @@
-# DeepSeek Harness 模型能力插件
+# DSH 自定义 API 能力识别插件
 
-[English](README.md)
+[下载 v0.1.1](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) · [English](README.md)
 
-`@maiziman/dsh-model-capabilities` 是一个独立的 DeepSeek Harness Bundle，用于为 `llm-pi-ai` 自定义提供方识别思考控制和图像输入能力。它只调用 Harness 的公开服务，不修改也不复制官方适配器，因此替换或升级官方 dsh 不会覆盖插件实现。
+**自动识别 OpenAI-compatible 自定义模型支持的思考等级与图像输入能力，不修改 DSH，也不覆盖明确设置。**
 
-## 它会修改什么
+`@maiziman/dsh-model-capabilities` 是面向 `llm-pi-ai` 自定义提供方的独立可选 DeepSeek Harness Bundle。它只调用 Harness 的公开服务，不修改也不复制官方适配器，因此替换或升级官方 dsh 不会覆盖插件实现。
+
+| 能力 | 行为 |
+|---|---|
+| **思考等级** | 先读取声明的等级元数据；策略允许时，只保存得到端点正面证据的等级。 |
+| **图像输入** | 先读取声明的视觉元数据；局域网端点可用程序生成的内嵌测试图片验证识图能力。 |
+| **明确设置优先** | 只补充缺失的能力字段，不替换用户或端点配置已经明确给出的值。 |
+| **公网端点保持被动** | 默认只读取元数据，不向公网端点发起产生 token 的主动探测。 |
+| **独立生命周期** | 使用官方 `dsh plugin` 命令安装，拥有独立安装包、校验和、兼容性验证与 Release。 |
+
+## 能力识别方式
 
 用户保存 OpenAI Completions 兼容提供方后，插件观察官方 `llm-pi-ai` 设置分节；其他提供方协议会被忽略。插件先读取端点公开的能力元数据，再通过带 revision 的局部写入更新该提供方的 `models` 数组。它只补充缺失的 `input` 或 `reasoningEfforts`；用户明确填写的值始终优先，包括 `reasoningEfforts: false` 和 `input: [text]`。
 
@@ -16,10 +26,10 @@
 
 ## 安装
 
-便携 ZIP 已经内置这个 Bundle。使用官方 npm 方式安装 DeepSeek Harness 时，可从 [v0.1.0 插件 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.0)下载带版本号的插件压缩包与校验和，再通过官方 Bundle 流程核验并安装：
+DeepSeek Harness 纯净便携 ZIP 不内置、也不会自动安装这个插件。请从 [DSH 自定义 API 能力识别插件 v0.1.1 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) 下载带版本号的压缩包与校验和，再通过官方 Bundle 流程核验并安装：
 
 ```powershell
-$version = '0.1.0'
+$version = '0.1.1'
 $package = "maiziman-dsh-model-capabilities-$version.tgz"
 $release = "https://github.com/maiziman/deepseek-harness-portable/releases/download/plugin-model-capabilities-v$version"
 Invoke-WebRequest "$release/$package" -OutFile $package
@@ -27,12 +37,11 @@ Invoke-WebRequest "$release/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
 $expected = ((Get-Content SHA256SUMS.txt -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
 $actual = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw '插件校验和不一致' }
-dsh plugin --profile web add ".\$package"
-dsh --profile web --dump-config
-dsh --profile web
+.\dsh.cmd plugin --profile web add ".\$package" --offline
+.\dsh.cmd --profile web --dump-config
 ```
 
-升级时使用新版插件 Release 重复执行同一命令即可。插件 Release 与便携 ZIP Release 相互独立，因此插件可以在不改变包内 dsh 版本的情况下单独升级。
+关闭 `DeepSeek-Harness.exe` 后，请在 Pure Portable 解压目录中运行这些命令，完成后重新打开 EXE。Pure Portable 会让这条官方命令使用包内固定哈希的 pnpm；已经下载的 `.tgz` 不需要访问 registry。如果使用单独的全局 dsh 安装，请把 `.\dsh.cmd` 替换为 `dsh`。升级时使用新版插件 Release 重复执行安装命令即可。插件 Release 与便携 ZIP Release 使用各自独立的版本和校验和。
 
 本地开发时可直接安装当前目录：
 
@@ -41,13 +50,13 @@ dsh plugin --profile web add ./plugins/dsh-model-capabilities
 dsh --profile web --dump-config
 ```
 
-便携版桌面程序会内置这个目录，并把七个发布文件暂存到 Web profile 内。首次创建 profile 时会自动执行同一套官方本地包登记流程；插件版本变化后则刷新暂存文件。如果便携目录发生移动，启动器会根据 profile 中的相对依赖声明修复 pnpm 生成的链接，然后再启动 Harness。
-
 包清单声明了 `dsh.bundle.patch`，`cordis.patch.yml` 会把插件作为后置组合行插入。卸载不会清除已经识别并保存到模型设置中的能力：
 
 ```sh
-dsh plugin --profile web remove @maiziman/dsh-model-capabilities
+.\dsh.cmd plugin --profile web remove @maiziman/dsh-model-capabilities --offline
 ```
+
+单独的全局 dsh 安装请把 `.\dsh.cmd` 替换为 `dsh`。
 
 ## 配置
 
@@ -100,9 +109,9 @@ npm pack --dry-run
 
 | DeepSeek Harness | 验证方式 |
 |---|---|
-| `0.1.1-rc.2` | 便携版登记、profile 启动、设置写入与成品运行时测试。 |
+| `0.1.1-rc.2` | 官方 Bundle 登记、profile 启动、设置写入与成品运行时测试。 |
 | `0.1.2-alpha.1`（`cd5ef814`） | 使用该精确源码标签的官方 `dsh plugin` 命令在全新环境安装最终 `.tgz`，完成完整 `--dump-config`、profile 启动、Settings/Credentials API 审查、更新事件时序回归与分层 `compat` 回归。 |
 
-每个插件 Release 标签都会按照 [`.github/plugin-compatibility.json`](../../.github/plugin-compatibility.json) 中固定的官方标签、提交和 pnpm 版本，重新执行全新安装、展开配置检查和 Web profile 启动；这道验证失败时不会公开 Release。
+每个插件 Release 标签都会按照 [`.github/plugin-compatibility.json`](../../.github/plugin-compatibility.json) 中固定的官方标签、提交和哈希固定的 pnpm 版本，重新执行全新安装、展开配置检查和 Web profile 启动。创建 Draft 前与正式公开前都会重新解析官方标签，并要求它仍指向同一提交。流程还会构建纯净便携 ZIP，拒绝任何已经内置该插件的 ZIP，然后在不依赖全局 pnpm 或 Corepack 缓存的环境中，通过该 ZIP 以离线模式安装精确插件候选；任一道验证失败都不会公开 Release。
 
-如果官方 Git 标签早于其精确 npm 包发布，便携版更新流程会等待这个包，而不会构建其他版本。Harness 仍处于预发布阶段，未来如果官方调整设置结构，插件可能需要同步升级；遇到验证失败或并发编辑时，插件会保留原设置，不影响上一份有效提供方配置继续工作。
+Harness 仍处于预发布阶段，未来如果官方调整设置结构，插件可能需要同步升级；遇到验证失败或并发编辑时，插件会保留原设置，不影响上一份有效提供方配置继续工作。便携版发布跟踪与插件相互独立，不会安装或更新这个 Bundle。

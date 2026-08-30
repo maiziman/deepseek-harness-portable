@@ -93,7 +93,7 @@ function componentProgress(linked, total) {
  * Resolve one localized startup milestone for display.
  * @param {string} key Milestone identifier.
  * @param {{locale?: string, firstRun?: boolean, linked?: number, total?: number}} options Display context.
- * @returns {{key: string, title: string, detail: string, progress: number, step: number, totalSteps: number}} Display state.
+ * @returns {{key: string, title: string, detail: string, progress: number, step: number, totalSteps: number, linked?: number, total?: number}} Display state.
  */
 function stageState(key, options = {}) {
   const stage = STAGES[key]
@@ -109,7 +109,7 @@ function stageState(key, options = {}) {
     : key === 'links' && linked > 0
       ? language === 'zh' ? `已准备 ${linked} 个组件。` : `${linked} components ready.`
       : defaultDetail
-  return {
+  const state = {
     key,
     title,
     detail,
@@ -117,29 +117,56 @@ function stageState(key, options = {}) {
     step: stage.step,
     totalSteps: TOTAL_STEPS,
   }
+  if (key === 'links') {
+    state.linked = total > 0 ? Math.min(linked, total) : linked
+    state.total = total
+  }
+  return state
 }
 
 /**
  * Count the flat unscoped and one-level scoped links in the profile fallback.
  * @param {string} modulesDir Profile fallback node_modules directory.
  * @param {object} io Filesystem implementation; replaceable for tests.
+ * @param {(linkPath: string) => boolean} includeLink Select links owned by this package.
  * @returns {number} Completed component-link count.
  */
-function countProfileLinks(modulesDir, io = fs) {
+function countProfileLinks(modulesDir, io = fs, includeLink = () => true) {
   if (!io.existsSync(modulesDir)) return 0
   let count = 0
   for (const entry of io.readdirSync(modulesDir, { withFileTypes: true })) {
-    if (entry.isSymbolicLink()) {
+    const entryPath = path.join(modulesDir, entry.name)
+    if (entry.isSymbolicLink() && includeLink(entryPath)) {
       count += 1
       continue
     }
     if (!entry.isDirectory() || !entry.name.startsWith('@')) continue
     const scopeDir = path.join(modulesDir, entry.name)
     for (const child of io.readdirSync(scopeDir, { withFileTypes: true })) {
-      if (child.isSymbolicLink()) count += 1
+      const childPath = path.join(scopeDir, child.name)
+      if (child.isSymbolicLink() && includeLink(childPath)) count += 1
     }
   }
   return count
+}
+
+/**
+ * Count profile links whose resolved target stays inside the packaged modules.
+ * @param {string} modulesDir Profile fallback node_modules directory.
+ * @param {string} packagedModulesDir Packaged application node_modules root.
+ * @param {object} io Filesystem implementation; replaceable for tests.
+ * @returns {number} Package-owned component-link count.
+ */
+function countPackageProfileLinks(modulesDir, packagedModulesDir, io = fs) {
+  const packagedRoot = path.resolve(packagedModulesDir)
+  return countProfileLinks(modulesDir, io, (linkPath) => {
+    try {
+      const relative = path.relative(packagedRoot, io.realpathSync(linkPath))
+      return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`))
+    } catch {
+      return false
+    }
+  })
 }
 
 /**
@@ -163,6 +190,23 @@ function profileInitializationState(profileManifestPresent, linked, total) {
     needsInitialization: profileManifestPresent !== true || (expected > 0 && !linksComplete),
     linksComplete,
   }
+}
+
+/**
+ * Take the final package-owned link sample before advancing past startup.
+ * @param {{firstRun: boolean, total: number, countLinks: () => number, stopWatcher: () => void, setStage: (key: string, options?: object) => Promise<void>, reportError: (error: Error) => void}} options Startup coordination hooks.
+ * @returns {Promise<number>} Final measured package-owned link count.
+ */
+async function completeStartupMilestones(options) {
+  let linked = 0
+  if (options.firstRun) {
+    try { linked = options.countLinks() } catch (error) { options.reportError(error) }
+  }
+  options.stopWatcher()
+  if (options.firstRun && linked > 0) await options.setStage('links', { linked, total: options.total })
+  await options.setStage('services')
+  await options.setStage('server')
+  return linked
 }
 
 function safeJson(value) {
@@ -235,9 +279,10 @@ function loadingPage(options) {
         steps.appendChild(item)
       }
       let currentProgress = -1
-      const render = (state) => {
-        if (state.progress < currentProgress) return
-        currentProgress = state.progress
+      let progressApi
+      const render = (state, snapshot = false) => {
+        if (!snapshot && state.progress < currentProgress) return
+        if (!snapshot) currentProgress = state.progress
         status.textContent = state.title
         detail.textContent = state.detail
         step.textContent = page.stepLabel + ' ' + state.step + ' / ' + state.totalSteps
@@ -248,14 +293,22 @@ function loadingPage(options) {
           const number = index + 1
           steps.children[index].className = number < state.step ? 'done' : number === state.step ? 'active' : ''
         }
+        progressApi.current = state
+        if (!snapshot) progressApi.history.push(state)
       }
       const renderElapsed = () => {
         const total = Math.max(0, Math.floor((Date.now() - page.startedAt) / 1000))
         const value = total < 60 ? total + (document.documentElement.lang.startsWith('zh') ? ' 秒' : 's') : Math.floor(total / 60) + (document.documentElement.lang.startsWith('zh') ? ' 分 ' : 'm ') + total % 60 + (document.documentElement.lang.startsWith('zh') ? ' 秒' : 's')
         elapsed.textContent = page.elapsedLabel + ' ' + value
       }
-      globalThis.dshStartupProgress = { update: render }
-      render(page.initial)
+      progressApi = {
+        current: null,
+        history: [],
+        snapshot: (state) => render(state, true),
+        update: render,
+      }
+      globalThis.dshStartupProgress = progressApi
+      progressApi.update(page.initial)
       renderElapsed()
       setInterval(renderElapsed, 1000)
     })()
@@ -265,7 +318,9 @@ function loadingPage(options) {
 }
 
 module.exports = {
+  completeStartupMilestones,
   componentProgress,
+  countPackageProfileLinks,
   countProfileLinks,
   languageFor,
   loadingPage,

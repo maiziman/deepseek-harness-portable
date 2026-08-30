@@ -5,14 +5,18 @@
 # The package layout (zip root: DeepSeek-Harness\):
 #   DeepSeek-Harness.exe   Electron shell; double-click entry point
 #   resources\app\...      shell sources (main.js)
-#   runtime\               official Node.js win-x64 with npm
+#   runtime\               official Node.js win-x64 plus pinned pnpm for optional plugin management
 #   app\node_modules\      production install of @deepseek-ai/dsh and deps
 #   dsh-home\  workspace\  data dirs (DSH_HOME points here; all data stays in-package)
 #   README.txt  dsh.cmd  manifest.json
+#requires -Version 7.2
 [CmdletBinding()]
 param(
   [string]$DshVersion = '',
   [string]$PortableVersion = '',
+  [string]$DshPackageDirectory = '',
+  [string]$DshSourceTag = '',
+  [string]$DshSourceSha = '',
   [string]$NodeVersion = 'v24.19.0',
   [string]$ElectronVersion = '44.0.0',
   [string]$ElectronMirror = 'npmmirror',
@@ -33,34 +37,47 @@ $staging = Join-Path $build 'shell-stage'
 # (ERR_PNPM_INCLUDED_DEPS_CONFLICT) against the root node_modules.
 $scratch = Join-Path $env:TEMP 'dsh-portable-build'
 $tools = Join-Path $scratch 'tools'
-$modelCapabilitiesSource = Join-Path $psRoot 'plugins\dsh-model-capabilities'
+. (Join-Path $psRoot '.github\scripts\pnpm-build-policy.ps1')
+. (Join-Path $psRoot '.github\scripts\pnpm-lock-policy.ps1')
 
-# pnpm is used instead of npm for all installs: the dsh dependency graph is a
-# few hundred packages and npm's reify planning stalls on it for minutes with
-# no disk writes, while pnpm resolves and extracts it in seconds. The tar
-# extraction drops pnpm into the runtime copy, so nothing depends on corepack
-# or a global install.
-function Install-Pnpm {
-  $target = Join-Path $build 'runtime\node_modules\pnpm'
+# pnpm is used instead of npm for build-time installs: the dsh dependency graph
+# is a few hundred packages and npm's reify planning stalls on it for minutes
+# with no disk writes, while pnpm resolves and extracts it in seconds. The same
+# hash-pinned pnpm payload is copied into the runtime so the official plugin
+# command never falls through to Corepack or a machine-global package manager.
+function Install-Pnpm([string]$Version, [string]$ExpectedSha256) {
+  $target = Join-Path $build 'pnpm'
   if (Test-Path (Join-Path $target 'bin\pnpm.cjs')) { return }
   New-Item -ItemType Directory -Force -Path $target | Out-Null
   # Cache outside .build so a failed build does not re-download the tarball.
   $cacheDir = Join-Path $psRoot '.cache'
   New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
-  $tgz = Join-Path $cacheDir 'pnpm-11.7.0.tgz'
+  $tgz = Join-Path $cacheDir "pnpm-$Version.tgz"
+  if (Test-Path -LiteralPath $tgz) {
+    $cachedSha = (Get-FileHash -LiteralPath $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($cachedSha -cne $ExpectedSha256) {
+      Remove-Item -LiteralPath $tgz -Force
+      Write-Warning "removed cached pnpm $Version tarball with unexpected SHA256: $cachedSha"
+    }
+  }
   if (-not (Test-Path $tgz)) {
     $sources = @(
-      'https://registry.npmmirror.com/pnpm/-/pnpm-11.7.0.tgz',
-      'https://registry.npmjs.org/pnpm/-/pnpm-11.7.0.tgz'
+      "https://registry.npmmirror.com/pnpm/-/pnpm-$Version.tgz",
+      "https://registry.npmjs.org/pnpm/-/pnpm-$Version.tgz"
     )
     $ok = $false
     foreach ($src in $sources) {
       for ($attempt = 1; $attempt -le 3 -and -not $ok; $attempt++) {
         try {
           Invoke-WebRequest -Uri $src -OutFile $tgz -TimeoutSec 120
+          $downloadedSha = (Get-FileHash -LiteralPath $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($downloadedSha -cne $ExpectedSha256) {
+            throw "SHA256 $downloadedSha does not match pinned $ExpectedSha256"
+          }
           $ok = $true
         } catch {
           Write-Warning "pnpm download failed ($src, attempt $attempt): $($_.Exception.Message)"
+          if (Test-Path -LiteralPath $tgz) { Remove-Item -LiteralPath $tgz -Force }
           Start-Sleep -Seconds 2
         }
       }
@@ -68,6 +85,8 @@ function Install-Pnpm {
     }
     if (-not $ok) { throw 'pnpm tarball download failed from all sources' }
   }
+  $actualSha256 = (Get-FileHash -LiteralPath $tgz -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actualSha256 -cne $ExpectedSha256) { throw "pnpm $Version tarball SHA256 mismatch" }
   tar -xzf $tgz -C $target --strip-components=1
   if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $target 'bin\pnpm.cjs'))) {
     throw 'pnpm tarball extraction failed'
@@ -76,36 +95,139 @@ function Install-Pnpm {
 
 function Install-Target([string]$target, [string[]]$pkgs, [switch]$ProdOnly) {
   New-Item -ItemType Directory -Force -Path $target | Out-Null
-  # pnpm 10+/11 ignores the package.json "pnpm" field; the onlyBuiltDependencies
-  # allowlist (postinstall scripts) lives in pnpm-workspace.yaml, and creating
-  # one here also makes this dir its own workspace root.
+  # pnpm 11 build-script approvals live in pnpm-workspace.yaml. Creating one
+  # here also makes this directory its own workspace root.
   $wsYaml = Join-Path $target 'pnpm-workspace.yaml'
   if (-not (Test-Path $wsYaml)) {
     if ($ProdOnly) {
-      # Production deps with postinstall scripts: koffi (native FFI binding),
-      # node-pty (native terminal), the local subprocess provider, and the
-      # Google GenAI / protobufjs helpers. Without these scripts the native
-      # prebuilds are not wired up.
-      $built = @(
-        "'@deepseek-ai/dsh-subprocess-local'",
-        "'@google/genai'",
-        "'koffi'",
-        "'node-pty'",
-        "'protobufjs'"
-      )
+      $buildPolicy = [ordered]@{
+        '@deepseek-ai/dsh-subprocess-local' = $true
+        '@google/genai' = $false
+        'koffi' = $true
+        'node-addon-require-builtin' = $false
+        'node-pty' = $true
+        'protobufjs' = $false
+      }
     } else {
-      $built = @("'electron'")
+      $buildPolicy = [ordered]@{ electron = $true }
     }
-    "onlyBuiltDependencies:`n" + (($built | ForEach-Object { "  - $_" }) -join "`n") | Set-Content $wsYaml
+    $workspaceLines = @('allowBuilds:')
+    foreach ($name in $buildPolicy.Keys) {
+      $quotedName = ConvertTo-Json $name -Compress
+      $enabled = ([bool]$buildPolicy[$name]).ToString().ToLowerInvariant()
+      $workspaceLines += "  ${quotedName}: $enabled"
+    }
+    $workspaceLines -join "`n" | Set-Content $wsYaml
   }
   $argsList = @('--dir', $target, 'add', '--node-linker=hoisted', '--reporter=append-only')
   if ($ProdOnly) { $argsList += '--prod' }
-  $pnpmCjs = Join-Path $build 'runtime\node_modules\pnpm\bin\pnpm.cjs'
+  $pnpmCjs = Join-Path $build 'pnpm\bin\pnpm.cjs'
   & (Join-Path $build 'runtime\node.exe') $pnpmCjs @argsList @pkgs
   if ($LASTEXITCODE -ne 0) { throw "pnpm install failed in $target (exit $LASTEXITCODE)" }
+  Assert-DshPnpmBuildScriptsComplete `
+    -NodePath (Join-Path $build 'runtime\node.exe') `
+    -PnpmCjsPath $pnpmCjs `
+    -TargetDirectory $target
+}
+
+function Install-OfficialConsumer(
+  [Parameter(Mandatory)][string]$Target,
+  [Parameter(Mandatory)][object]$PackageInput,
+  [Parameter(Mandatory)][string]$StoreDirectory,
+  [Parameter(Mandatory)][string]$CacheDirectory
+) {
+  $lockPath = Join-Path $Target 'pnpm-lock.yaml'
+  $internalAllowlist = @($PackageInput.InternalRuntimePackages | ForEach-Object {
+    [pscustomobject]@{
+      Name = [string]$_.Name
+      Version = [string]$_.Version
+      RelativePath = [IO.Path]::GetRelativePath($Target, [string]$_.File).Replace('\', '/')
+      Protocol = 'file'
+    }
+  })
+  $lockResult = Assert-DshPnpmLockMatchesRuntimeResolutions `
+    -CandidateLockPath $lockPath `
+    -ExpectedConsumerLockControl $PackageInput.ConsumerLockControl `
+    -ExpectedResolutions $PackageInput.ExternalRuntimeResolutions `
+    -ExpectedInternalSnapshots $PackageInput.InternalRuntimeSnapshots `
+    -InternalPackageAllowlist $internalAllowlist
+  Write-Output "=== official runtime lock: $($lockResult.InternalCount) internal and $($lockResult.CandidateCount) external packages verified ==="
+
+  New-Item -ItemType Directory -Force -Path $StoreDirectory, $CacheDirectory | Out-Null
+  $node = Join-Path $build 'runtime\node.exe'
+  $pnpmCjs = Join-Path $build 'pnpm\bin\pnpm.cjs'
+  $consumerParent = [IO.Path]::GetFullPath((Split-Path $Target -Parent)).TrimEnd([char]'\', [char]'/')
+  $fetchTarget = Join-Path $consumerParent '.consumer-fetch'
+  if (Test-Path -LiteralPath $fetchTarget) { throw "official fetch scratch path already exists: $fetchTarget" }
+  $savedCi = $env:CI
+  try {
+    $env:CI = 'true'
+    New-Item -ItemType Directory -Path $fetchTarget | Out-Null
+    foreach ($record in @($PackageInput.ConsumerFiles)) {
+      Copy-Item `
+        -LiteralPath (Join-Path $Target ([string]$record.relativePath)) `
+        -Destination (Join-Path $fetchTarget ([string]$record.relativePath))
+    }
+    try {
+      & $node $pnpmCjs `
+        --dir $fetchTarget fetch `
+        --frozen-lockfile `
+        --ignore-scripts `
+        --trust-lockfile `
+        --registry=https://registry.npmjs.org/ `
+        --store-dir $StoreDirectory `
+      --cache-dir $CacheDirectory `
+      --reporter=append-only
+      if ($LASTEXITCODE -ne 0) { throw "official canonical-lock fetch failed (exit $LASTEXITCODE)" }
+    } finally {
+      $resolvedFetchTarget = [IO.Path]::GetFullPath($fetchTarget)
+      if ((Split-Path $resolvedFetchTarget -Parent) -cne $consumerParent -or
+        (Split-Path $resolvedFetchTarget -Leaf) -cne '.consumer-fetch') {
+        throw "refusing to clean unexpected official fetch path: $resolvedFetchTarget"
+      }
+      if (Test-Path -LiteralPath $resolvedFetchTarget) {
+        Remove-Item -LiteralPath $resolvedFetchTarget -Recurse -Force
+      }
+    }
+
+    & $node $pnpmCjs `
+      --dir $Target install `
+      --frozen-lockfile `
+      --offline `
+      --prod `
+      --node-linker=hoisted `
+      --trust-lockfile `
+      --registry=https://registry.npmjs.org/ `
+      --store-dir $StoreDirectory `
+      --cache-dir $CacheDirectory `
+      --reporter=append-only
+    if ($LASTEXITCODE -ne 0) { throw "official frozen-lock install failed (exit $LASTEXITCODE)" }
+  } finally {
+    $env:CI = $savedCi
+  }
+  Assert-DshPnpmBuildScriptsComplete `
+    -NodePath $node `
+    -PnpmCjsPath $pnpmCjs `
+    -TargetDirectory $Target
+
+  foreach ($record in @($PackageInput.ConsumerFiles)) {
+    $relativePath = [string]$record.relativePath
+    $consumerFile = Join-Path $Target $relativePath
+    if (-not (Test-Path -LiteralPath $consumerFile -PathType Leaf)) {
+      throw "official frozen-lock install removed consumer file: $relativePath"
+    }
+    $item = Get-Item -LiteralPath $consumerFile
+    $sha256 = (Get-FileHash -LiteralPath $consumerFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($item.Length -ne [int64]$record.size -or $sha256 -cne [string]$record.sha256) {
+      throw "official frozen-lock install changed consumer file: $relativePath"
+    }
+  }
 }
 
 # ── 0. resolve versions ──────────────────────────────────────────────────────
+if (-not $DshVersion -and $DshPackageDirectory) {
+  throw 'DshVersion is required with DshPackageDirectory'
+}
 if (-not $DshVersion) {
   $meta = Invoke-RestMethod -Uri 'https://registry.npmjs.org/@deepseek-ai/dsh'
   $DshVersion = [string]$meta.'dist-tags'.latest
@@ -117,7 +239,44 @@ if ($PortableVersion -notmatch $versionPattern) { throw "unexpected portable ver
 if ($NodeVersion -notmatch '^v?\d+\.\d+\.\d+$') { throw "unexpected Node version: $NodeVersion" }
 if (-not $NodeVersion.StartsWith('v')) { $NodeVersion = 'v' + $NodeVersion }
 
-Write-Output "=== target: portable $PortableVersion, dsh $DshVersion, node $NodeVersion, electron $ElectronVersion ==="
+$officialPackageInput = $null
+$packageInputPath = ''
+if ($DshPackageDirectory) {
+  if (-not $DshSourceTag -or $DshSourceSha -cnotmatch '^[0-9a-f]{40}$') {
+    throw 'DshPackageDirectory requires DshSourceTag and a lowercase 40-character DshSourceSha'
+  }
+  $packageInputPath = (Get-Item -LiteralPath $DshPackageDirectory -ErrorAction Stop).FullName
+  $buildFull = [IO.Path]::GetFullPath($build).TrimEnd([char]'\', [char]'/')
+  $scratchFull = [IO.Path]::GetFullPath($scratch).TrimEnd([char]'\', [char]'/')
+  foreach ($ephemeralRoot in @($buildFull, $scratchFull)) {
+    if ($packageInputPath -ceq $ephemeralRoot -or $packageInputPath.StartsWith($ephemeralRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+      throw 'DshPackageDirectory must stay outside directories that the build cleans'
+    }
+  }
+  . (Join-Path $psRoot '.github\scripts\official-dsh-package-input.ps1')
+  $officialPackageInput = Get-DshOfficialPackageInput `
+    -Directory $packageInputPath `
+    -ExpectedVersion $DshVersion `
+    -ExpectedSourceTag $DshSourceTag `
+    -ExpectedSourceSha $DshSourceSha
+} elseif ($DshSourceTag -or $DshSourceSha) {
+  throw 'DshSourceTag and DshSourceSha are valid only with DshPackageDirectory'
+}
+
+$dshInputKind = if ($officialPackageInput) { 'official tagged source packages' } else { 'npm package' }
+$pnpmVersion = if ($officialPackageInput) {
+  ([string]$officialPackageInput.PackageManager).Substring('pnpm@'.Length)
+} else {
+  '11.7.0'
+}
+$trustedPnpmSha256 = @{
+  '11.7.0' = 'deafa7ec98a1218b6a047289b92fbe2395c1e22d3495bb711653013218ee15ee'
+}
+if (-not $trustedPnpmSha256.ContainsKey($pnpmVersion)) {
+  throw "no pinned SHA256 is recorded for required pnpm $pnpmVersion"
+}
+$pnpmSha256 = [string]$trustedPnpmSha256[$pnpmVersion]
+Write-Output "=== target: portable $PortableVersion, dsh $DshVersion ($dshInputKind), node $NodeVersion, electron $ElectronVersion ==="
 
 # Electron binary source: npmmirror (default, for CN networks), github
 # (official, for CI runners), or any custom @electron/get mirror URL.
@@ -133,7 +292,23 @@ if ($ElectronMirror -eq 'npmmirror') {
 }
 
 # ── 1. clean and prepare ─────────────────────────────────────────────────────
-if (Test-Path $build) { Remove-Item -Recurse -Force $build }
+# .build may also contain an independently checked-out upstream source used for
+# auditing. Remove only paths owned by this script instead of treating the
+# whole shared diagnostics directory as disposable.
+$ownedBuildPaths = @(
+  (Join-Path $build 'app'),
+  (Join-Path $build 'profile'),
+  (Join-Path $build 'shell-stage'),
+  (Join-Path $build 'runtime'),
+  (Join-Path $build 'pnpm'),
+  (Join-Path $build 'smoke.png'),
+  (Join-Path $build 'startup-progress.png'),
+  (Join-Path $build "node-$NodeVersion-win-x64.zip"),
+  (Join-Path $build "node-$NodeVersion-win-x64")
+)
+foreach ($ownedPath in $ownedBuildPaths) {
+  if (Test-Path -LiteralPath $ownedPath) { Remove-Item -LiteralPath $ownedPath -Recurse -Force }
+}
 if (Test-Path $scratch) { Remove-Item -Recurse -Force $scratch }
 New-Item -ItemType Directory -Force -Path $build, $dist, $tools | Out-Null
 
@@ -165,45 +340,78 @@ if ($nodeVer.Trim() -ne $NodeVersion) { throw "bundled node reports $nodeVer, ex
 # Installed into the scratch dir (outside the pnpm workspace), then copied into
 # the build tree. node-linker=hoisted yields a flat npm-like node_modules, so
 # the packaged tree needs no symlinks (which Windows zip extraction breaks).
-$scratchApp = Join-Path $scratch 'app'
 Write-Output "=== installing @deepseek-ai/dsh@$DshVersion (production deps, pnpm) ==="
-Install-Pnpm
-Copy-Item (Join-Path $psRoot 'shell\pnpm.cmd') (Join-Path $build 'runtime\pnpm.cmd') -ErrorAction Stop
-Install-Target $scratchApp -ProdOnly @("@deepseek-ai/dsh@$DshVersion")
+Install-Pnpm -Version $pnpmVersion -ExpectedSha256 $pnpmSha256
+& (Join-Path $psRoot '.github\scripts\pnpm-build-policy.test.ps1') `
+  -NodePath (Join-Path $build 'runtime\node.exe') `
+  -PnpmCjsPath (Join-Path $build 'pnpm\bin\pnpm.cjs')
+& (Join-Path $psRoot '.github\scripts\pnpm-lock-policy.test.ps1')
+$scratchApp = Join-Path $scratch 'app'
+if ($officialPackageInput) {
+  $scratchOfficialInput = Join-Path $scratch 'official-input'
+  Copy-Item -LiteralPath $packageInputPath -Destination $scratchOfficialInput -Recurse -Force
+  $officialPackageInput = Get-DshOfficialPackageInput `
+    -Directory $scratchOfficialInput `
+    -ExpectedVersion $DshVersion `
+    -ExpectedSourceTag $DshSourceTag `
+    -ExpectedSourceSha $DshSourceSha
+  $scratchApp = Join-Path $scratchOfficialInput 'consumer'
+}
+$runtimePnpm = Join-Path $build 'runtime\node_modules\pnpm'
+if (Test-Path -LiteralPath $runtimePnpm) { Remove-Item -LiteralPath $runtimePnpm -Recurse -Force }
+Copy-Item -LiteralPath (Join-Path $build 'pnpm') -Destination $runtimePnpm -Recurse -Force
+Copy-Item -LiteralPath (Join-Path $psRoot 'shell\pnpm.cmd') -Destination (Join-Path $build 'runtime\pnpm.cmd') -Force
+$runtimePnpmVersion = (& (Join-Path $build 'runtime\pnpm.cmd') --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $runtimePnpmVersion -cne $pnpmVersion) {
+  throw "bundled pnpm reports '$runtimePnpmVersion', expected '$pnpmVersion'"
+}
+if ($officialPackageInput) {
+  $runtimePackages = @($officialPackageInput.InternalRuntimePackages)
+  Write-Output "=== official runtime closure: $($runtimePackages.Count) of $($officialPackageInput.Packages.Count) internal packages ==="
+  Install-OfficialConsumer `
+    -Target $scratchApp `
+    -PackageInput $officialPackageInput `
+    -StoreDirectory (Join-Path $scratch 'official-runtime-store') `
+    -CacheDirectory (Join-Path $scratch 'official-runtime-cache')
+} else {
+  Install-Target $scratchApp -ProdOnly @("@deepseek-ai/dsh@$DshVersion")
+}
+
+# Package-manager state is not used at runtime and can retain build-machine
+# file: locations when the official source tarballs were the install input.
+foreach ($metadataPath in @(
+  (Join-Path $scratchApp 'package.json'),
+  (Join-Path $scratchApp 'pnpm-lock.yaml'),
+  (Join-Path $scratchApp 'pnpm-workspace.yaml'),
+  (Join-Path $scratchApp 'node_modules\.modules.yaml'),
+  (Join-Path $scratchApp 'node_modules\.pnpm-workspace-state-v1.json'),
+  (Join-Path $scratchApp 'node_modules\.pnpm\lock.yaml')
+)) {
+  if (Test-Path -LiteralPath $metadataPath -PathType Leaf) { Remove-Item -LiteralPath $metadataPath -Force }
+}
+$virtualStore = Join-Path $scratchApp 'node_modules\.pnpm'
+if ((Test-Path -LiteralPath $virtualStore -PathType Container) -and @(Get-ChildItem -LiteralPath $virtualStore -Force).Count -eq 0) {
+  Remove-Item -LiteralPath $virtualStore -Force
+}
 $app = Join-Path $build 'app'
+if (Test-Path -LiteralPath $app) { throw 'build app staging directory was not cleaned' }
 Copy-Item -Recurse -Force $scratchApp $app
+if (Test-Path -LiteralPath (Join-Path $app 'app')) { throw 'build app staging unexpectedly contains a nested app copy' }
+. (Join-Path $psRoot '.github\scripts\portable-build-metadata.ps1')
+$metadataNormalization = Normalize-DshPortableBuildMetadata (Join-Path $app 'node_modules')
+Assert-DshPortableBuildMetadataClean (Join-Path $app 'node_modules')
+Write-Output "=== normalized $($metadataNormalization.SourceAnnotations) source and $($metadataNormalization.ShimAnnotations) shim annotations ==="
 $dshBin = Join-Path $app 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 if (-not (Test-Path $dshBin)) { throw "dsh bin missing after install: $dshBin" }
 $dshPkg = Get-Content (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') | ConvertFrom-Json
 if ($dshPkg.version -cne $DshVersion) { throw "installed dsh version $($dshPkg.version) != $DshVersion" }
-
-# The capability helper is an ordinary official-format Bundle package. The
-# desktop shell registers this local package through `dsh plugin` when needed,
-# so replacing the upstream install cannot overwrite it. Copy only publishable
-# runtime files; tests stay in the repository.
-$modelCapabilitiesTarget = Join-Path $app 'node_modules\@maiziman\dsh-model-capabilities'
-$modelCapabilitiesFiles = @(
-  'package.json',
-  'index.js',
-  'capability-detection.js',
-  'cordis.patch.yml',
-  'README.md',
-  'README.zh.md',
-  'LICENSE'
-)
-New-Item -ItemType Directory -Force -Path $modelCapabilitiesTarget | Out-Null
-foreach ($file in $modelCapabilitiesFiles) {
-  $source = Join-Path $modelCapabilitiesSource $file
-  if (-not (Test-Path $source -PathType Leaf)) { throw "model capability plugin file missing: $source" }
-  Copy-Item $source (Join-Path $modelCapabilitiesTarget $file)
-}
-$modelCapabilitiesManifest = Get-Content (Join-Path $modelCapabilitiesTarget 'package.json') -Raw | ConvertFrom-Json
-if ($modelCapabilitiesManifest.dsh.bundle.patch -cne './cordis.patch.yml') {
-  throw 'model capability plugin is not an installable dsh Bundle'
+$installedDshVersion = (& (Join-Path $build 'runtime\node.exe') $dshBin --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $installedDshVersion -cne $DshVersion) {
+  throw "installed official CLI reported '$installedDshVersion', expected '$DshVersion'"
 }
 
 # ── 4. Electron tools (build-only) ───────────────────────────────────────────
-Write-Output '=== installing electron 44.0.0 + @electron/packager (build-only, pnpm) ==='
+Write-Output "=== installing electron $ElectronVersion + @electron/packager (build-only, pnpm) ==="
 Install-Target $tools @("electron@$ElectronVersion", '@electron/packager@20.3.0')
 
 # Electron 44's npm package has no postinstall lifecycle; the binary lands
@@ -236,21 +444,27 @@ $stagedIcon = Join-Path $stagingShell 'icon.ico'
 Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagedIcon -ErrorAction Stop
 
 Write-Output '=== electron-packager ==='
+$productName = 'DeepSeek Harness Pure Portable'
 $packagerCli = @(
   (Join-Path $tools 'node_modules\@electron\packager\bin\electron-packager.mjs'),
   (Join-Path $tools 'node_modules\@electron\packager\bin\electron-packager.js'),
   (Join-Path $tools 'node_modules\@electron\packager\cli.js')
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $packagerCli) { throw '@electron/packager bin not found under shell-tools' }
-& (Join-Path $build 'runtime\node.exe') $packagerCli $stagingShell 'DshDesktop' `
+& (Join-Path $build 'runtime\node.exe') $packagerCli $stagingShell `
   --platform win32 --arch x64 --out $profile --overwrite `
   --icon $stagedIcon `
+  --executable-name 'DeepSeek-Harness' `
+  "--win32metadata.ProductName=$productName" `
+  "--win32metadata.FileDescription=$productName" `
+  '--win32metadata.OriginalFilename=DeepSeek-Harness.exe' `
+  '--win32metadata.InternalName=DeepSeek-Harness' `
   --electron-version $ElectronVersion --electron-zip-dir $electronZip.DirectoryName `
   --app-version $PortableVersion --no-prune
 if ($LASTEXITCODE -ne 0) { throw "electron-packager failed (exit $LASTEXITCODE)" }
-$packed = Join-Path $profile 'DshDesktop-win32-x64'
+$packed = Join-Path $profile "$productName-win32-x64"
 if (-not (Test-Path $packed)) { throw "packager output missing: $packed" }
-$packedExe = Join-Path $packed 'DshDesktop.exe'
+$packedExe = Join-Path $packed 'DeepSeek-Harness.exe'
 if (-not (Test-Path $packedExe -PathType Leaf)) { throw "packaged exe missing: $packedExe" }
 
 $iconVerifier = Join-Path $psRoot '.github\scripts\verify-exe-icon.mjs'
@@ -263,9 +477,8 @@ if ($LASTEXITCODE -ne 0) { throw "packaged exe icon verification failed (exit $L
 # ── 6. assemble the portable tree ────────────────────────────────────────────
 $pkg = Join-Path $profile 'DeepSeek-Harness'
 Rename-Item $packed $pkg
-$exe = Join-Path $pkg 'DshDesktop.exe'
+$exe = Join-Path $pkg 'DeepSeek-Harness.exe'
 if (-not (Test-Path $exe)) { throw "packaged exe missing: $exe" }
-Rename-Item $exe (Join-Path $pkg 'DeepSeek-Harness.exe')
 
 Copy-Item -Recurse -Force (Join-Path $build 'runtime') (Join-Path $pkg 'runtime')
 Copy-Item -Recurse -Force $app (Join-Path $pkg 'app')
@@ -277,21 +490,47 @@ Copy-Item (Join-Path $psRoot 'THIRD_PARTY_NOTICES.md') (Join-Path $pkg 'THIRD_PA
 Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
 
 $manifest = [ordered]@{
-  name = 'DeepSeek Harness portable desktop'
+  name = 'DeepSeek Harness Pure Portable'
   platform = 'win32'; arch = 'x64'
   portableVersion = $PortableVersion
   dshVersion = $DshVersion
   nodeVersion = $NodeVersion
+  pnpmVersion = $pnpmVersion
+  pnpmPackageSha256 = $pnpmSha256
   electronVersion = $ElectronVersion
   updateFeed = 'https://github.com/maiziman/deepseek-harness-portable/releases'
-  modelCapabilitiesVersion = $modelCapabilitiesManifest.version
+  dshSource = if ($officialPackageInput) {
+    [ordered]@{
+      kind = 'official-git-tag'
+      repository = 'https://github.com/deepseek-ai/deepseek-harness'
+      tag = $DshSourceTag
+      commit = $DshSourceSha
+      packageManager = $officialPackageInput.PackageManager
+      packageCount = $officialPackageInput.Packages.Count
+      runtimePackageCount = $runtimePackages.Count
+      internalSnapshotCount = $officialPackageInput.InternalRuntimeSnapshots.Count
+      externalResolutionCount = $officialPackageInput.ExternalRuntimeResolutions.Count
+      provenanceSha256 = $officialPackageInput.ProvenanceSha256
+      runtimeLockSha256 = $officialPackageInput.RuntimeLockSha256
+      runtimeResolutionsSha256 = $officialPackageInput.ExternalRuntimeResolutionsSha256
+      internalRuntimeSnapshotsSha256 = $officialPackageInput.InternalRuntimeSnapshotsSha256
+      consumerLockControlSha256 = $officialPackageInput.ConsumerLockControlSha256
+      consumerLockSha256 = $officialPackageInput.ConsumerLockSha256
+    }
+  } else {
+    [ordered]@{
+      kind = 'npm'
+      package = '@deepseek-ai/dsh'
+      version = $DshVersion
+    }
+  }
   startupProfileLinkCount = $null
   builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   runtimeSource = if ((Test-Path (Join-Path $runtimeSrc 'node.exe')) -and -not $ForceDownloadNode) { 'local-reuse' } else { 'https://nodejs.org/dist/' }
   nodeExeSha256 = (Get-FileHash (Join-Path $pkg 'runtime\node.exe') -Algorithm SHA256).Hash.ToLower()
   shellExeSha256 = (Get-FileHash (Join-Path $pkg 'DeepSeek-Harness.exe') -Algorithm SHA256).Hash.ToLower()
 }
-$manifest | ConvertTo-Json | Set-Content (Join-Path $pkg 'manifest.json')
+$manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $pkg 'manifest.json')
 
 # ── 7. smoke test: boot the UI headless and capture a screenshot ─────────────
 if (-not $SkipSmoke) {
@@ -302,11 +541,13 @@ if (-not $SkipSmoke) {
     DSH_SMOKE = $env:DSH_SMOKE
     DSH_SMOKE_OUT = $env:DSH_SMOKE_OUT
     DSH_SMOKE_PROGRESS_OUT = $env:DSH_SMOKE_PROGRESS_OUT
+    DSH_SMOKE_PROGRESS_STATE_OUT = $env:DSH_SMOKE_PROGRESS_STATE_OUT
   }
   try {
     $env:DSH_SMOKE = '1'
     $env:DSH_SMOKE_OUT = $smokeOut
     $env:DSH_SMOKE_PROGRESS_OUT = $startupSmokeOut
+    $env:DSH_SMOKE_PROGRESS_STATE_OUT = ''
     $proc = Start-Process -FilePath (Join-Path $pkg 'DeepSeek-Harness.exe') -WorkingDirectory $pkg -PassThru
     $smokeTimeoutMs = 270000
     if (-not $proc.WaitForExit($smokeTimeoutMs)) {
@@ -333,22 +574,28 @@ if (-not $SkipSmoke) {
     $env:DSH_SMOKE = $envOld.DSH_SMOKE
     $env:DSH_SMOKE_OUT = $envOld.DSH_SMOKE_OUT
     $env:DSH_SMOKE_PROGRESS_OUT = $envOld.DSH_SMOKE_PROGRESS_OUT
+    $env:DSH_SMOKE_PROGRESS_STATE_OUT = $envOld.DSH_SMOKE_PROGRESS_STATE_OUT
   }
 
   $profileModules = Join-Path $pkg 'dsh-home\profiles\node_modules'
+  $packagedModulesRoot = [IO.Path]::GetFullPath((Join-Path $pkg 'app\node_modules')).TrimEnd([char]'\', [char]'/')
   $profileLinkCount = 0
   foreach ($entry in @(Get-ChildItem $profileModules -Force)) {
     if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-      $profileLinkCount++
+      $target = [IO.Path]::GetFullPath([string]$entry.Target)
+      if ($target -ceq $packagedModulesRoot -or $target.StartsWith($packagedModulesRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $profileLinkCount++ }
     } elseif ($entry.PSIsContainer -and $entry.Name.StartsWith('@')) {
       foreach ($child in @(Get-ChildItem $entry.FullName -Force)) {
-        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $profileLinkCount++ }
+        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+          $target = [IO.Path]::GetFullPath([string]$child.Target)
+          if ($target -ceq $packagedModulesRoot -or $target.StartsWith($packagedModulesRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $profileLinkCount++ }
+        }
       }
     }
   }
   if ($profileLinkCount -le 0) { throw 'smoke test initialized no profile component links' }
   $manifest['startupProfileLinkCount'] = $profileLinkCount
-  $manifest | ConvertTo-Json | Set-Content (Join-Path $pkg 'manifest.json')
+  $manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $pkg 'manifest.json')
   Write-Output "startup progress metadata: $profileLinkCount profile component links"
 } else {
   Write-Output '=== smoke skipped ==='
@@ -360,6 +607,23 @@ if (-not $SkipSmoke) {
 # re-initializes the home on first run.
 Remove-Item -Recurse -Force (Join-Path $pkg 'dsh-home') -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path (Join-Path $pkg 'dsh-home') | Out-Null
+$sensitiveBuildPaths = @(
+  $repoRoot,
+  $psRoot,
+  $build,
+  $profile,
+  $scratch,
+  $env:TEMP,
+  $env:USERPROFILE,
+  $env:RUNNER_TEMP,
+  $env:RUNNER_WORKSPACE,
+  $env:GITHUB_WORKSPACE
+)
+if ($packageInputPath) { $sensitiveBuildPaths += $packageInputPath }
+$pathScan = Assert-DshPortableTreeHasNoSensitivePaths `
+  -Root $pkg `
+  -SensitivePaths @($sensitiveBuildPaths | Where-Object { $_ } | Sort-Object -Unique)
+Write-Output "=== build path scan: $($pathScan.Files) files against $($pathScan.Patterns) sensitive forms ==="
 
 # ── 8. zip + checksums ───────────────────────────────────────────────────────
 $zipName = "DeepSeek-Harness-win64-v$PortableVersion.zip"

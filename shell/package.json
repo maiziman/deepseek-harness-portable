@@ -1,10 +1,10 @@
 {
   "name": "dsh-desktop-shell",
-  "productName": "DeepSeek Harness",
+  "productName": "DeepSeek Harness Pure Portable",
   "version": "1.0.0",
-  "description": "DeepSeek Harness portable desktop shell: spawns the bundled dsh server and shows the Web UI in a native window",
+  "description": "Clean Windows desktop shell for official tagged DeepSeek Harness source built without code patches",
   "main": "main.js",
-  "author": "DeepSeek Harness portable packager",
+  "author": "DeepSeek Harness Pure Portable community packager",
   "license": "MIT",
   "private": true
 }

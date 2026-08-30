@@ -12,26 +12,36 @@
 # Usage:
 #   .\verify-package.ps1                       # newest zip in dist\
 #   .\verify-package.ps1 -ZipPath X.zip        # specific package
+#   .\verify-package.ps1 -ZipPath X.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.1
 #   .\verify-package.ps1 -Keep                 # keep the extracted tree
+#requires -Version 7.2
 [CmdletBinding()]
 param(
   [string]$ZipPath = '',
   [string]$WorkDir = '',
   [string]$ExpectedPortableVersion = '',
   [string]$ExpectedDshVersion = '',
+  [string]$ExpectedDshSourceTag = '',
+  [string]$ExpectedDshSourceSha = '',
   [switch]$Keep
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
+. (Join-Path $root '.github\scripts\portable-build-metadata.ps1')
 
-function Get-ProfileLinkCount([string]$ModulesDir) {
+function Get-ProfileLinkCount([string]$ModulesDir, [string]$PackagedModulesDir) {
+  $packagedRoot = [IO.Path]::GetFullPath($PackagedModulesDir).TrimEnd([char]'\', [char]'/')
   $count = 0
   foreach ($entry in @(Get-ChildItem $ModulesDir -Force)) {
     if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-      $count++
+      $target = [IO.Path]::GetFullPath([string]$entry.Target)
+      if ($target -ceq $packagedRoot -or $target.StartsWith($packagedRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $count++ }
     } elseif ($entry.PSIsContainer -and $entry.Name.StartsWith('@')) {
       foreach ($child in @(Get-ChildItem $entry.FullName -Force)) {
-        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { $count++ }
+        if (($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+          $target = [IO.Path]::GetFullPath([string]$child.Target)
+          if ($target -ceq $packagedRoot -or $target.StartsWith($packagedRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { $count++ }
+        }
       }
     }
   }
@@ -51,9 +61,33 @@ Write-Output "=== verify: $ZipPath"
 New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 if (Get-Command tar -ErrorAction SilentlyContinue) { tar -xf $ZipPath -C $WorkDir }
 else { Expand-Archive -Path $ZipPath -DestinationPath $WorkDir -Force }
+$topLevel = @(Get-ChildItem -LiteralPath $WorkDir -Force)
+if ($topLevel.Count -ne 1 -or -not $topLevel[0].PSIsContainer -or $topLevel[0].Name -cne 'DeepSeek-Harness') {
+  throw 'ZIP must contain exactly one DeepSeek-Harness top-level directory'
+}
 $pkgRoot = Join-Path $WorkDir 'DeepSeek-Harness'
+$reparsePoints = @(
+  @(
+    Get-Item -LiteralPath $pkgRoot -Force
+    Get-ChildItem -LiteralPath $pkgRoot -Recurse -Force
+  ) | Where-Object { ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 }
+)
+if ($reparsePoints.Count -gt 0) {
+  throw "extracted package contains a reparse point before first launch: $($reparsePoints[0].FullName)"
+}
+$dshHome = Join-Path $pkgRoot 'dsh-home'
+if (-not (Test-Path -LiteralPath $dshHome -PathType Container) -or @(Get-ChildItem -LiteralPath $dshHome -Force).Count -ne 0) {
+  throw 'packaged dsh-home must exist and be completely empty before first launch'
+}
 $exe = Join-Path $pkgRoot 'DeepSeek-Harness.exe'
 if (-not (Test-Path $exe)) { throw "extraction incomplete: $exe missing" }
+$exeVersion = (Get-Item -LiteralPath $exe).VersionInfo
+if ([string]$exeVersion.ProductName -cne 'DeepSeek Harness Pure Portable' -or
+  [string]$exeVersion.FileDescription -cne 'DeepSeek Harness Pure Portable' -or
+  [string]$exeVersion.OriginalFilename -cne 'DeepSeek-Harness.exe' -or
+  [string]$exeVersion.InternalName -cne 'DeepSeek-Harness') {
+  throw "EXE branding metadata is inconsistent: $($exeVersion | Select-Object ProductName, FileDescription, OriginalFilename, InternalName | ConvertTo-Json -Compress)"
+}
 $shellArchive = Join-Path $pkgRoot 'resources\app.asar'
 $unpackedUpdateModule = Join-Path $pkgRoot 'resources\app\update.js'
 if (-not (Test-Path $shellArchive) -and -not (Test-Path $unpackedUpdateModule)) {
@@ -81,26 +115,83 @@ if ($ExpectedPortableVersion -and [string]$manifest.portableVersion -cne $Expect
 if ($ExpectedDshVersion -and [string]$manifest.dshVersion -cne $ExpectedDshVersion) {
   throw "manifest dsh version does not match the requested build: $($manifest.dshVersion) != $ExpectedDshVersion"
 }
+if ([string]$manifest.name -cne 'DeepSeek Harness Pure Portable') { throw "unexpected package name: $($manifest.name)" }
+if ([string]$exeVersion.ProductVersion -cne [string]$manifest.portableVersion -or
+  [string]$exeVersion.FileVersion -cne [string]$manifest.portableVersion) {
+  throw "EXE version metadata does not match portable $($manifest.portableVersion)"
+}
+if ([bool]$ExpectedDshSourceTag -ne [bool]$ExpectedDshSourceSha) {
+  throw 'ExpectedDshSourceTag and ExpectedDshSourceSha must be supplied together'
+}
+$sourceKind = [string]$manifest.dshSource.kind
+if ($sourceKind -ceq 'official-git-tag') {
+  if ([string]$manifest.dshSource.repository -cne 'https://github.com/deepseek-ai/deepseek-harness' -or
+    [string]$manifest.dshSource.tag -cne "dsh-v$($manifest.dshVersion)" -or
+    [string]$manifest.dshSource.commit -cnotmatch '^[0-9a-f]{40}$' -or
+    [string]$manifest.dshSource.packageManager -cnotmatch '^pnpm@\d+\.\d+\.\d+$' -or
+    [int]$manifest.dshSource.packageCount -le 0 -or
+    [int]$manifest.dshSource.runtimePackageCount -le 0 -or
+    [int]$manifest.dshSource.runtimePackageCount -gt [int]$manifest.dshSource.packageCount -or
+    [int]$manifest.dshSource.internalSnapshotCount -ne [int]$manifest.dshSource.runtimePackageCount -or
+    [int]$manifest.dshSource.externalResolutionCount -lt 50 -or
+    [string]$manifest.dshSource.provenanceSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    [string]$manifest.dshSource.runtimeLockSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    [string]$manifest.dshSource.runtimeResolutionsSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    [string]$manifest.dshSource.internalRuntimeSnapshotsSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    [string]$manifest.dshSource.consumerLockControlSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+    [string]$manifest.dshSource.consumerLockSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'manifest has invalid official dsh source provenance'
+  }
+  if ($ExpectedDshSourceTag) {
+    if ($ExpectedDshSourceSha -cnotmatch '^[0-9a-f]{40}$') { throw 'ExpectedDshSourceSha must be a lowercase 40-character commit' }
+    if ([string]$manifest.dshSource.tag -cne $ExpectedDshSourceTag -or
+      [string]$manifest.dshSource.commit -cne $ExpectedDshSourceSha) {
+      throw 'manifest official dsh source provenance does not match the requested source'
+    }
+  }
+} elseif ($sourceKind -ceq 'npm') {
+  if ($ExpectedDshSourceTag) { throw 'manifest does not contain the requested official dsh source' }
+  if ([string]$manifest.dshSource.package -cne '@deepseek-ai/dsh' -or
+    [string]$manifest.dshSource.version -cne [string]$manifest.dshVersion) {
+    throw 'manifest has invalid npm dsh source provenance'
+  }
+} else {
+  throw "manifest has an unsupported dsh source: $($manifest.dshSource.kind)"
+}
 $expectedZipName = "DeepSeek-Harness-win64-v$($manifest.portableVersion).zip"
 if ((Split-Path -Leaf $ZipPath) -cne $expectedZipName) {
   throw "ZIP name does not match manifest portable version: expected $expectedZipName"
 }
 $nodeVer = & (Join-Path $pkgRoot 'runtime\node.exe') --version
 if ($nodeVer.Trim() -ne $manifest.nodeVersion) { throw "node version mismatch: $($nodeVer.Trim()) != $($manifest.nodeVersion)" }
-if (-not (Test-Path (Join-Path $pkgRoot 'runtime\pnpm.cmd') -PathType Leaf)) { throw 'bundled pnpm launcher is missing' }
+$pnpmManifest = Get-Content (Join-Path $pkgRoot 'runtime\node_modules\pnpm\package.json') -Raw | ConvertFrom-Json
+$pnpmVer = (& (Join-Path $pkgRoot 'runtime\pnpm.cmd') --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $pnpmVer -cne [string]$manifest.pnpmVersion -or
+  [string]$pnpmManifest.version -cne [string]$manifest.pnpmVersion -or
+  [string]$manifest.pnpmPackageSha256 -cnotmatch '^[0-9a-f]{64}$') {
+  throw "pinned plugin package manager mismatch: runtime $pnpmVer / package $($pnpmManifest.version) / manifest $($manifest.pnpmVersion)"
+}
 if ($manifest.updateFeed -ne 'https://github.com/maiziman/deepseek-harness-portable/releases') { throw "unexpected update feed: $($manifest.updateFeed)" }
-if ($manifest.modelCapabilitiesVersion -notmatch '^\d+\.\d+\.\d+') { throw 'manifest has no model capability plugin version' }
 if ($manifest.startupProfileLinkCount -le 0) { throw 'manifest has no startup profile component total' }
 $modelCapabilitiesRoot = Join-Path $pkgRoot 'app\node_modules\@maiziman\dsh-model-capabilities'
-$modelCapabilitiesManifestPath = Join-Path $modelCapabilitiesRoot 'package.json'
-$modelCapabilitiesPatchPath = Join-Path $modelCapabilitiesRoot 'cordis.patch.yml'
-if (-not (Test-Path $modelCapabilitiesManifestPath -PathType Leaf) -or -not (Test-Path $modelCapabilitiesPatchPath -PathType Leaf)) {
-  throw 'model capability Bundle is missing from the portable app'
+if (Test-Path -LiteralPath $modelCapabilitiesRoot) { throw 'pure portable package unexpectedly contains the optional capability plugin' }
+$packageManagerState = @(
+  (Join-Path $pkgRoot 'app\package.json'),
+  (Join-Path $pkgRoot 'app\pnpm-lock.yaml'),
+  (Join-Path $pkgRoot 'app\pnpm-workspace.yaml'),
+  (Join-Path $pkgRoot 'app\node_modules\.modules.yaml'),
+  (Join-Path $pkgRoot 'app\node_modules\.pnpm-workspace-state-v1.json'),
+  (Join-Path $pkgRoot 'app\node_modules\.pnpm')
+)
+foreach ($statePath in $packageManagerState) {
+  if (Test-Path -LiteralPath $statePath) { throw "portable package contains build-time package-manager state: $statePath" }
 }
-$modelCapabilitiesManifest = Get-Content $modelCapabilitiesManifestPath -Raw | ConvertFrom-Json
-if (($modelCapabilitiesManifest.version -cne $manifest.modelCapabilitiesVersion) -or
-  ($modelCapabilitiesManifest.dsh.bundle.patch -cne './cordis.patch.yml')) {
-  throw 'model capability Bundle manifest does not match the portable manifest'
+Assert-DshPortableBuildMetadataClean (Join-Path $pkgRoot 'app\node_modules')
+$dshBin = Join-Path $pkgRoot 'app\node_modules\@deepseek-ai\dsh\lib\bin.js'
+if (-not (Test-Path -LiteralPath $dshBin -PathType Leaf)) { throw 'official dsh CLI entry is missing' }
+$dshCliVersion = (& (Join-Path $pkgRoot 'runtime\node.exe') $dshBin --version | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $dshCliVersion -cne [string]$manifest.dshVersion) {
+  throw "official dsh CLI version mismatch: $dshCliVersion != $($manifest.dshVersion)"
 }
 $readme = Get-Content (Join-Path $pkgRoot 'README.txt') -Raw
 $versionLine = "版本：portable $($manifest.portableVersion) / dsh $($manifest.dshVersion) / Node $($manifest.nodeVersion) / Electron $($manifest.electronVersion)"
@@ -111,21 +202,24 @@ $notices = Get-Content $noticesPath -Raw
 if (-not $notices.Contains('Copyright (c) 2026 DeepSeek') -or -not $notices.Contains('apps/web/public/favicon.svg')) {
   throw 'DeepSeek whale mark source or license notice missing'
 }
-Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2} / model capabilities {3}' -f $manifest.dshVersion, $manifest.nodeVersion, $manifest.electronVersion, $manifest.modelCapabilitiesVersion)
+Write-Output ('[2/4] manifest OK: dsh {0} / node {1} / electron {2} / source {3}' -f $manifest.dshVersion, $manifest.nodeVersion, $manifest.electronVersion, $manifest.dshSource.kind)
 
 # ── 3. smoke: boot the app, capture the UI ───────────────────────────────────
 $smoke = Join-Path $WorkDir 'smoke.png'
 $startupSmoke = Join-Path $WorkDir 'startup-progress.png'
+$startupStatePath = Join-Path $WorkDir 'startup-progress-state.json'
 $saved = @{
   DSH_SMOKE = $env:DSH_SMOKE
   DSH_SMOKE_OUT = $env:DSH_SMOKE_OUT
   DSH_SMOKE_PROGRESS_OUT = $env:DSH_SMOKE_PROGRESS_OUT
+  DSH_SMOKE_PROGRESS_STATE_OUT = $env:DSH_SMOKE_PROGRESS_STATE_OUT
   DSH_SMOKE_DELAY_MS = $env:DSH_SMOKE_DELAY_MS
 }
 try {
   $env:DSH_SMOKE = '1'
   $env:DSH_SMOKE_OUT = $smoke
   $env:DSH_SMOKE_PROGRESS_OUT = $startupSmoke
+  $env:DSH_SMOKE_PROGRESS_STATE_OUT = $startupStatePath
   $env:DSH_SMOKE_DELAY_MS = '4000'
   $proc = Start-Process -FilePath $exe -WorkingDirectory $pkgRoot -PassThru
   $smokeTimeoutMs = 270000
@@ -148,11 +242,29 @@ try {
   if ($img.Length -lt 10240) { throw "screenshot suspiciously small: $($img.Length) bytes" }
   $startupImg = Get-Item $startupSmoke
   if ($startupImg.Length -lt 10240) { throw "startup screenshot suspiciously small: $($startupImg.Length) bytes" }
+  if (-not (Test-Path -LiteralPath $startupStatePath -PathType Leaf)) { throw 'startup progress evidence was not written' }
+  $startupState = Get-Content -LiteralPath $startupStatePath -Raw | ConvertFrom-Json
+  if (-not [bool]$startupState.firstRun -or
+    [int]$startupState.expectedLinks -ne [int]$manifest.startupProfileLinkCount -or
+    [int]$startupState.measuredLinks -le 0 -or
+    [string]$startupState.rendered.key -cne 'links' -or
+    [int]$startupState.rendered.linked -le 0 -or
+    [int]$startupState.rendered.total -ne [int]$manifest.startupProfileLinkCount -or
+    -not ([string]$startupState.rendered.detail).Contains("$($startupState.rendered.linked)") -or
+    -not ([string]$startupState.rendered.detail).Contains("$($startupState.rendered.total)")) {
+    throw "startup progress did not render measured package-owned component evidence: $($startupState | ConvertTo-Json -Depth 5 -Compress)"
+  }
+  $verificationArtifacts = Join-Path $root '.build'
+  New-Item -ItemType Directory -Force -Path $verificationArtifacts | Out-Null
+  Copy-Item -LiteralPath $smoke -Destination (Join-Path $verificationArtifacts 'smoke.png') -Force
+  Copy-Item -LiteralPath $startupSmoke -Destination (Join-Path $verificationArtifacts 'startup-progress.png') -Force
+  Copy-Item -LiteralPath $startupStatePath -Destination (Join-Path $verificationArtifacts 'startup-progress-state.json') -Force
   Write-Output ('[3/4] smoke OK: exit 0, startup {0} KB, UI {1} KB' -f [math]::Round($startupImg.Length / 1KB), [math]::Round($img.Length / 1KB))
 } finally {
   $env:DSH_SMOKE = $saved.DSH_SMOKE
   $env:DSH_SMOKE_OUT = $saved.DSH_SMOKE_OUT
   $env:DSH_SMOKE_PROGRESS_OUT = $saved.DSH_SMOKE_PROGRESS_OUT
+  $env:DSH_SMOKE_PROGRESS_STATE_OUT = $saved.DSH_SMOKE_PROGRESS_STATE_OUT
   $env:DSH_SMOKE_DELAY_MS = $saved.DSH_SMOKE_DELAY_MS
 }
 
@@ -162,7 +274,7 @@ if ($log -notmatch 'dsh web: http://') { throw 'server never announced its URL' 
 if (-not (Test-Path (Join-Path $pkgRoot 'dsh-home\profiles\web'))) { throw 'web profile was not initialized' }
 $profileModules = Join-Path $pkgRoot 'dsh-home\profiles\node_modules'
 if (-not (Test-Path (Join-Path $profileModules '@deepseek-ai\dsh'))) { throw 'installation fallback not prepared' }
-$actualProfileLinks = Get-ProfileLinkCount $profileModules
+$actualProfileLinks = Get-ProfileLinkCount $profileModules (Join-Path $pkgRoot 'app\node_modules')
 if ($actualProfileLinks -ne $manifest.startupProfileLinkCount) {
   throw "startup component total mismatch: $actualProfileLinks != $($manifest.startupProfileLinkCount)"
 }

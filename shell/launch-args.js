@@ -1,58 +1,40 @@
 'use strict'
 
-const CAPABILITY_PACKAGE = '@maiziman/dsh-model-capabilities'
-const CAPABILITY_LINK_SPEC = '@maiziman/dsh-model-capabilities@link:./.portable-plugins/dsh-model-capabilities'
+const path = require('node:path')
 
-/** Build the official plugin-manager invocation for the bundled package. */
-function capabilityInstallArgs(dshBin) {
-  if (typeof dshBin !== 'string' || dshBin.length === 0) throw new TypeError('dshBin must be a non-empty string')
-  return [dshBin, 'plugin', '--profile', 'web', 'add', '--offline', CAPABILITY_LINK_SPEC]
-}
-
-/** Build an official reinstall that repairs profile links after a directory move. */
-function capabilityRepairArgs(dshBin) {
-  if (typeof dshBin !== 'string' || dshBin.length === 0) throw new TypeError('dshBin must be a non-empty string')
-  return [dshBin, 'plugin', '--profile', 'web', 'install', '--offline', '--force']
-}
-
-/** Whether the Web profile declares this Bundle through its portable relative link. */
-function capabilityProfileRegistered(profileManifest) {
-  if (profileManifest === null || typeof profileManifest !== 'object') return false
-  const dependencies = profileManifest.dependencies
-  const bundles = profileManifest.dsh?.profile?.bundles
-  const dependency = dependencies !== null
-    && typeof dependencies === 'object'
-    && Object.hasOwn(dependencies, CAPABILITY_PACKAGE)
-    ? dependencies[CAPABILITY_PACKAGE]
-    : undefined
-  const normalizedDependency = typeof dependency === 'string'
-    ? dependency.replaceAll('\\', '/').replace(/^link:\.\//u, 'link:')
-    : undefined
-  return normalizedDependency === 'link:.portable-plugins/dsh-model-capabilities'
-    && Array.isArray(bundles)
-    && bundles.includes(CAPABILITY_PACKAGE)
-}
-
-/** Whether the Web profile names the expected installed Bundle version. */
-function capabilityBundleRegistered(profileManifest, installedManifest, expectedVersion) {
-  if (installedManifest === null || typeof installedManifest !== 'object') return false
-  return capabilityProfileRegistered(profileManifest)
-    && installedManifest.name === CAPABILITY_PACKAGE
-    && installedManifest.version === expectedVersion
-}
-
-/** Build the normal Web-profile server invocation after plugin registration. */
+/** Build the normal Web-profile server invocation. */
 function dshServerArgs(dshBin) {
   if (typeof dshBin !== 'string' || dshBin.length === 0) throw new TypeError('dshBin must be a non-empty string')
   return [dshBin, 'web', '--no-open', '--port', '0']
 }
 
+/** Build the child environment while keeping plugin package-manager data in DSH_HOME. */
+function portableDshEnv(baseEnv, dshHome, runtimeRoot) {
+  if (!baseEnv || typeof baseEnv !== 'object') throw new TypeError('baseEnv must be an object')
+  if (typeof dshHome !== 'string' || dshHome.length === 0) throw new TypeError('dshHome must be a non-empty string')
+  if (typeof runtimeRoot !== 'string' || runtimeRoot.length === 0) throw new TypeError('runtimeRoot must be a non-empty string')
+  const reserved = new Set([
+    'dsh_home',
+    'node_compile_cache',
+    'node_compile_cache_portable',
+    'path',
+    'pnpm_config_cache_dir',
+    'pnpm_config_state_dir',
+    'pnpm_config_store_dir',
+  ])
+  const inheritedPath = Object.entries(baseEnv).find(([key]) => key.toLowerCase() === 'path')?.[1] || ''
+  const env = Object.fromEntries(Object.entries(baseEnv).filter(([key]) => !reserved.has(key.toLowerCase())))
+  env.DSH_HOME = dshHome
+  env.PATH = [runtimeRoot, inheritedPath].filter(Boolean).join(path.delimiter)
+  env.pnpm_config_cache_dir = path.join(dshHome, 'pnpm-cache')
+  env.pnpm_config_state_dir = path.join(dshHome, 'pnpm-state')
+  env.pnpm_config_store_dir = path.join(dshHome, 'pnpm-store')
+  env.NODE_COMPILE_CACHE = path.join(dshHome, 'node-compile-cache')
+  env.NODE_COMPILE_CACHE_PORTABLE = '1'
+  return env
+}
+
 module.exports = {
-  CAPABILITY_PACKAGE,
-  CAPABILITY_LINK_SPEC,
-  capabilityBundleRegistered,
-  capabilityInstallArgs,
-  capabilityProfileRegistered,
-  capabilityRepairArgs,
   dshServerArgs,
+  portableDshEnv,
 }

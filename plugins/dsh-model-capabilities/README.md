@@ -1,10 +1,20 @@
-# DeepSeek Harness Model Capabilities
+# DSH Custom API Capabilities
 
-[中文](README.zh.md)
+[Download v0.1.1](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1) · [中文](README.zh.md)
 
-`@maiziman/dsh-model-capabilities` is an independent DeepSeek Harness Bundle that discovers reasoning controls and image input for custom `llm-pi-ai` providers. It uses public Harness services and leaves the official adapter unchanged, so an upstream dsh replacement cannot overwrite the plugin's implementation.
+**Automatically detects reasoning levels and image input for OpenAI-compatible custom models—without patching DSH or overriding explicit settings.**
 
-## What it changes
+`@maiziman/dsh-model-capabilities` is an independent, opt-in DeepSeek Harness Bundle for custom `llm-pi-ai` providers. It uses public Harness services and leaves the official adapter unchanged, so an upstream dsh replacement cannot overwrite the plugin implementation.
+
+| Feature | Behavior |
+|---|---|
+| **Reasoning levels** | Reads declared effort metadata and, when permitted, records only levels confirmed by positive endpoint evidence. |
+| **Image input** | Reads declared vision metadata and can verify image understanding with generated inline test images on local endpoints. |
+| **Explicit settings win** | Fills only absent capability fields; a value chosen by the user or endpoint configuration is never replaced. |
+| **Public endpoints stay passive** | Reads metadata but makes no active, token-generating probe to a public endpoint by default. |
+| **Independent lifecycle** | Installs through the official `dsh plugin` command and has its own package, checksum, compatibility check, and Release. |
+
+## How discovery works
 
 The plugin observes the official `llm-pi-ai` settings namespace after an OpenAI Completions-compatible provider is saved. Other provider protocols are ignored. It reads declared capability metadata first, then applies revision-checked path mutations to that provider's `models` array. It only fills an absent `input` or `reasoningEfforts` field; an explicit model value, including `reasoningEfforts: false` or `input: [text]`, always wins.
 
@@ -16,10 +26,10 @@ Public endpoints receive metadata requests only by default. This avoids silent b
 
 ## Install
 
-The portable ZIP already includes this Bundle. For an official npm installation of DeepSeek Harness, download the versioned plugin tarball and checksum from the [v0.1.0 plugin Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.0), then verify and install it with the official Bundle workflow:
+No DeepSeek Harness Pure Portable ZIP bundles or automatically installs this plugin. Download the versioned tarball and checksum from the [DSH Custom API Capabilities v0.1.1 Release](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.1), then verify and install it with the official Bundle workflow:
 
 ```powershell
-$version = '0.1.0'
+$version = '0.1.1'
 $package = "maiziman-dsh-model-capabilities-$version.tgz"
 $release = "https://github.com/maiziman/deepseek-harness-portable/releases/download/plugin-model-capabilities-v$version"
 Invoke-WebRequest "$release/$package" -OutFile $package
@@ -27,12 +37,11 @@ Invoke-WebRequest "$release/SHA256SUMS.txt" -OutFile SHA256SUMS.txt
 $expected = ((Get-Content SHA256SUMS.txt -Raw).Trim() -split '\s+')[0].ToLowerInvariant()
 $actual = (Get-FileHash $package -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw 'plugin checksum mismatch' }
-dsh plugin --profile web add ".\$package"
-dsh --profile web --dump-config
-dsh --profile web
+.\dsh.cmd plugin --profile web add ".\$package" --offline
+.\dsh.cmd --profile web --dump-config
 ```
 
-Repeat the same command with a newer plugin Release to upgrade. The plugin Release is intentionally separate from portable ZIP Releases, so its version can advance without changing the packaged dsh version.
+Run these commands from the extracted Pure Portable directory after closing `DeepSeek-Harness.exe`, then reopen the EXE. Pure Portable uses its bundled hash-pinned pnpm for this official command, and the downloaded `.tgz` needs no registry access. With a separate global dsh installation, replace `.\dsh.cmd` with `dsh`. Repeat the install command with a newer plugin Release to upgrade. Plugin Releases and portable ZIP Releases have separate versions and checksums.
 
 During local development, install this directory instead:
 
@@ -41,13 +50,13 @@ dsh plugin --profile web add ./plugins/dsh-model-capabilities
 dsh --profile web --dump-config
 ```
 
-The portable desktop ships this directory and stages its seven published files under the Web profile. It performs the same official local-package registration when the profile is first created, and refreshes the staged files when the plugin version changes. If the portable directory moves, the launcher repairs pnpm's generated link from the profile's relative dependency declaration before starting Harness.
-
 The package manifest declares `dsh.bundle.patch`, and `cordis.patch.yml` inserts the plugin as a later composition row. Removal does not alter model settings that were already confirmed and saved:
 
 ```sh
-dsh plugin --profile web remove @maiziman/dsh-model-capabilities
+.\dsh.cmd plugin --profile web remove @maiziman/dsh-model-capabilities --offline
 ```
+
+For a separate global dsh installation, use `dsh` in place of `.\dsh.cmd`.
 
 ## Configuration
 
@@ -100,9 +109,9 @@ The test suite covers metadata formats, local-network classification, positive-e
 
 | DeepSeek Harness | Verification |
 |---|---|
-| `0.1.1-rc.2` | Portable registration, profile boot, settings mutation, and packaged runtime tests. |
+| `0.1.1-rc.2` | Official Bundle registration, profile boot, settings mutation, and packaged-runtime tests. |
 | `0.1.2-alpha.1` (`cd5ef814`) | Clean install of this final `.tgz` through the exact tagged source's official `dsh plugin` command, complete `--dump-config`, profile boot, Settings/Credentials API review, update-event timing regression, and layered `compat` regression. |
 
-Every plugin Release tag repeats the clean official-source install, expanded-config check, and Web-profile boot against the exact tag, commit, and pnpm version in [`.github/plugin-compatibility.json`](../../.github/plugin-compatibility.json). The Release is not published if that gate fails.
+Every plugin Release tag repeats the clean official-source install, expanded-config check, and Web-profile boot against the exact tag, commit, and hash-pinned pnpm version in [`.github/plugin-compatibility.json`](../../.github/plugin-compatibility.json). Immediately before Draft creation and again before publication, it resolves the official tag and requires the same commit. It also builds a pure portable ZIP, rejects any ZIP that already contains the plugin, and installs the exact plugin candidate through that ZIP in offline mode without relying on global pnpm or Corepack caches. The Release is not published if any gate fails.
 
-When an official Git tag precedes its exact npm package, the portable updater waits for that package rather than building a different version. Harness is still pre-release, so a future upstream settings schema may require a plugin update. A failed validation or concurrent edit is contained and leaves the last valid provider configuration serving requests.
+Harness is still pre-release, so a future upstream settings schema may require a plugin update. A failed validation or concurrent edit is contained and leaves the last valid provider configuration serving requests. Portable release tracking is independent and never installs or updates this Bundle.

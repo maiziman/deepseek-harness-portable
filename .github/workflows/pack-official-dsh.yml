@@ -1,0 +1,183 @@
+# Build the exact package set from one official DeepSeek Harness Git tag by
+# running that checkout's own release verification, build, pack, and install
+# verification. Callers consume the one hashed artifact on Windows.
+name: pack-official-dsh
+
+on:
+  workflow_call:
+    inputs:
+      dsh_version:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      source_tag:
+        required: true
+        type: string
+    outputs:
+      artifact_name:
+        description: Artifact containing the verified official package set
+        value: ${{ jobs.pack.outputs.artifact_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    runs-on: ubuntu-24.04
+    outputs:
+      artifact_name: ${{ steps.identity.outputs.artifact_name }}
+    env:
+      DSH_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Check out the portable packaging project
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out the exact official source commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: deepseek-ai/deepseek-harness
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          path: upstream
+          persist-credentials: false
+
+      - name: Test official package staging and rejection paths
+        shell: pwsh
+        run: '& ./.github/scripts/official-dsh-package-input.test.ps1'
+
+      - name: Verify source identity before executing it
+        id: source
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+          EXPECTED_TAG: ${{ inputs.source_tag }}
+          EXPECTED_VERSION: ${{ inputs.dsh_version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location ./upstream
+          try {
+            $head = (git rev-parse HEAD | Out-String).Trim()
+            $tagCommit = (git rev-list -n 1 "refs/tags/$env:EXPECTED_TAG" | Out-String).Trim()
+            $trackedChanges = (git status --porcelain --untracked-files=no | Out-String).Trim()
+            $root = Get-Content ./package.json -Raw | ConvertFrom-Json
+            $cli = Get-Content ./apps/cli/package.json -Raw | ConvertFrom-Json
+          } finally {
+            Pop-Location
+          }
+          if ($env:EXPECTED_SHA -cnotmatch '^[0-9a-f]{40}$' -or $head -cne $env:EXPECTED_SHA -or $tagCommit -cne $env:EXPECTED_SHA) {
+            throw "official tag, requested commit, and checkout HEAD do not agree"
+          }
+          if ($trackedChanges) { throw "official checkout is not clean before build" }
+          if ([string]$root.version -cne $env:EXPECTED_VERSION -or [string]$cli.version -cne $env:EXPECTED_VERSION) {
+            throw "official root and CLI versions do not match $env:EXPECTED_VERSION"
+          }
+          $packageManagerMatch = [regex]::Match([string]$root.packageManager, '^pnpm@(?<version>(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))$')
+          if (-not $packageManagerMatch.Success) { throw "official source has an unsupported packageManager" }
+          "pnpm_version=$($packageManagerMatch.Groups['version'].Value)" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+
+      - name: Install the hash-pinned package manager selected by the official source
+        shell: bash
+        env:
+          PNPM_VERSION: ${{ steps.source.outputs.pnpm_version }}
+        run: |
+          set -euo pipefail
+          case "$PNPM_VERSION" in
+            11.7.0) expected_sha=deafa7ec98a1218b6a047289b92fbe2395c1e22d3495bb711653013218ee15ee ;;
+            *) echo "No trusted pnpm SHA256 is recorded for $PNPM_VERSION" >&2; exit 1 ;;
+          esac
+          pnpm_root="$RUNNER_TEMP/pinned-pnpm-$PNPM_VERSION"
+          pnpm_tgz="$RUNNER_TEMP/pnpm-$PNPM_VERSION.tgz"
+          curl --fail --location --silent --show-error \
+            "https://registry.npmjs.org/pnpm/-/pnpm-$PNPM_VERSION.tgz" \
+            --output "$pnpm_tgz"
+          printf '%s  %s\n' "$expected_sha" "$pnpm_tgz" | sha256sum --check --strict
+          mkdir -p "$pnpm_root"
+          tar -xzf "$pnpm_tgz" -C "$pnpm_root" --strip-components=1
+          chmod +x "$pnpm_root/bin/pnpm.cjs"
+          ln -s "$pnpm_root/bin/pnpm.cjs" "$pnpm_root/pnpm"
+          printf '%s\n' "$pnpm_root" >> "$GITHUB_PATH"
+          printf 'PINNED_PNPM_CJS=%s\n' "$pnpm_root/bin/pnpm.cjs" >> "$GITHUB_ENV"
+          export PATH="$pnpm_root:$PATH"
+          test "$(pnpm --version)" = "$PNPM_VERSION"
+
+      - name: Install the immutable official workspace
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+
+      - name: Test exact runtime-lock derivation and tamper rejection
+        run: node ./.github/scripts/derive-official-runtime-lock.test.mjs --module-root ./upstream
+
+      - name: Run the official release verification and build
+        working-directory: upstream
+        run: |
+          pnpm run release:verify --family dsh
+          pnpm run build:official
+
+      - name: Run the official package commands
+        working-directory: upstream
+        run: |
+          pnpm run release:pack --family dsh --out dist/npm --concurrency 8
+          pnpm run release:pack --family vendor --out dist/npm-vendor --concurrency 8
+          pnpm --dir native/landlock-run run build:ts
+          pnpm --dir native/landlock-run/packages/entry pack --pack-destination "$PWD/dist/npm-landlock"
+
+      - name: Run the official clean-install verification
+        working-directory: upstream
+        run: pnpm run release:verify-packed-install --family dsh --from dist/npm --from dist/npm-vendor --from dist/npm-landlock
+
+      - name: Stage and verify the immutable package input
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+          EXPECTED_TAG: ${{ inputs.source_tag }}
+          EXPECTED_VERSION: ${{ inputs.dsh_version }}
+        run: |
+          ./.github/scripts/stage-official-dsh-packages.ps1 `
+            -SourceDirectory ./upstream `
+            -OutputDirectory (Join-Path $env:RUNNER_TEMP 'official-dsh-packages') `
+            -ExpectedVersion $env:EXPECTED_VERSION `
+            -ExpectedSourceTag $env:EXPECTED_TAG `
+            -ExpectedSourceSha $env:EXPECTED_SHA
+
+      - name: Derive and freeze the exact Windows runtime lock
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+          EXPECTED_TAG: ${{ inputs.source_tag }}
+          EXPECTED_VERSION: ${{ inputs.dsh_version }}
+        run: |
+          ./.github/scripts/finalize-official-dsh-runtime.ps1 `
+            -SourceDirectory ./upstream `
+            -PackageDirectory (Join-Path $env:RUNNER_TEMP 'official-dsh-packages') `
+            -ExpectedVersion $env:EXPECTED_VERSION `
+            -ExpectedSourceTag $env:EXPECTED_TAG `
+            -ExpectedSourceSha $env:EXPECTED_SHA `
+            -NodePath (Get-Command node).Source `
+            -PnpmCjsPath $env:PINNED_PNPM_CJS `
+            -StoreDirectory (Join-Path $env:RUNNER_TEMP 'portable-runtime-lock-store') `
+            -CacheDirectory (Join-Path $env:RUNNER_TEMP 'portable-runtime-lock-cache')
+
+      - name: Name the source package artifact
+        id: identity
+        shell: pwsh
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          "artifact_name=official-dsh-packages-$env:EXPECTED_SHA" >> $env:GITHUB_OUTPUT
+
+      - name: Upload the verified official package set
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.identity.outputs.artifact_name }}
+          path: ${{ runner.temp }}/official-dsh-packages
+          if-no-files-found: error
+          retention-days: 7

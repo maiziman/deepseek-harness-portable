@@ -25,6 +25,19 @@ function Assert-DshReleaseBodySha256 {
   }
 }
 
+function Assert-DshReleaseNameSha256 {
+  param(
+    [Parameter(Mandatory)][object]$Release,
+    [Parameter(Mandatory)][string]$ExpectedSha256
+  )
+
+  if ($ExpectedSha256 -cnotmatch '^[0-9a-f]{64}$') { throw 'expected Release name SHA256 is invalid' }
+  $actual = Get-DshTextSha256 -Text ([string]$Release.name)
+  if ($actual -cne $ExpectedSha256) {
+    throw "Release $($Release.id) name changed: expected $ExpectedSha256, found $actual"
+  }
+}
+
 function Assert-DshReleaseRepository {
   param([Parameter(Mandatory)][string]$Repository)
 

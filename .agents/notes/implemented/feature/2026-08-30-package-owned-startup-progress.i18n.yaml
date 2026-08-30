@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority.
+2026-08-30-package-owned-startup-progress.md: 1fc44a0474daf51f373f3d77a625b92a771d8ee8
+2026-08-30-package-owned-startup-progress.zh.md: 8e5a2889e5b05d556e97d22aa48398d300291f47

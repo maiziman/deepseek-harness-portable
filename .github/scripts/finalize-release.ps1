@@ -12,6 +12,8 @@ param(
   [string]$DraftTag = '',
   [string]$ExpectedCommit = '',
   [string]$ExpectedBodySha256 = '',
+  [string]$ExpectedNameSha256 = '',
+  [switch]$RequireExistingTag,
   [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -33,6 +35,9 @@ if (-not $ValidateOnly) {
   if ($ExpectedBodySha256 -cnotmatch '^[0-9a-f]{64}$') {
     throw 'ExpectedBodySha256 must be a lowercase SHA256 digest from the staging step'
   }
+  if ($ExpectedNameSha256 -cnotmatch '^[0-9a-f]{64}$') {
+    throw 'ExpectedNameSha256 must be a lowercase SHA256 digest from the staging step'
+  }
 }
 
 $assetContext = Get-DshValidatedReleaseAssets -PackageName $PackageName -AssetsDir $AssetsDir
@@ -43,6 +48,7 @@ $headers = New-DshGitHubHeaders
 
 $release = Get-DshReleaseById -Repository $Repository -ReleaseId $ReleaseId -Headers $headers
 Assert-DshReleaseBodySha256 -Release $release -ExpectedSha256 $ExpectedBodySha256
+Assert-DshReleaseNameSha256 -Release $release -ExpectedSha256 $ExpectedNameSha256
 
 if (-not (Test-DshReleaseIsDraft -Release $release)) {
   Assert-DshReleaseIdentity -Release $release -Tag $Tag -ReleaseId $ReleaseId
@@ -74,18 +80,21 @@ $targetRelease = Get-DshUniqueReleaseForTag -Repository $Repository -Tag $Tag -H
 if ($null -ne $targetRelease) {
   throw "Release state changed for tag $Tag; refusing to publish isolated Draft id $ReleaseId"
 }
-Assert-DshTagCommitSha `
-  -Repository $Repository `
-  -Tag $Tag `
-  -ExpectedSha $ExpectedCommit `
-  -Headers $headers `
-  -AllowMissing
+$tagCheck = @{
+  Repository = $Repository
+  Tag = $Tag
+  ExpectedSha = $ExpectedCommit
+  Headers = $headers
+}
+if (-not $RequireExistingTag) { $tagCheck.AllowMissing = $true }
+Assert-DshTagCommitSha @tagCheck
 Assert-DshRemoteAssets -Release $release -AssetContext $assetContext | Out-Null
 
 # Re-read the exact id and target tag immediately before the only public-state
 # mutation. GitHub applies the final tag assignment and publication together.
 $release = Get-DshReleaseById -Repository $Repository -ReleaseId $ReleaseId -Headers $headers
 Assert-DshReleaseBodySha256 -Release $release -ExpectedSha256 $ExpectedBodySha256
+Assert-DshReleaseNameSha256 -Release $release -ExpectedSha256 $ExpectedNameSha256
 Assert-DshReleaseIdentity -Release $release -Tag $DraftTag -ReleaseId $ReleaseId
 if (-not (Test-DshReleaseIsDraft -Release $release)) {
   throw "isolated Release $ReleaseId became public before finalization"
@@ -97,20 +106,24 @@ $targetRelease = Get-DshUniqueReleaseForTag -Repository $Repository -Tag $Tag -H
 if ($null -ne $targetRelease) {
   throw "Release state changed for tag $Tag immediately before publication"
 }
-Assert-DshTagCommitSha `
-  -Repository $Repository `
-  -Tag $Tag `
-  -ExpectedSha $ExpectedCommit `
-  -Headers $headers `
-  -AllowMissing
+$tagCheck = @{
+  Repository = $Repository
+  Tag = $Tag
+  ExpectedSha = $ExpectedCommit
+  Headers = $headers
+}
+if (-not $RequireExistingTag) { $tagCheck.AllowMissing = $true }
+Assert-DshTagCommitSha @tagCheck
 Assert-DshRemoteAssets -Release $release -AssetContext $assetContext | Out-Null
 
 $payload = @{
   tag_name = $Tag
   target_commitish = $ExpectedCommit
+  body = [string]$release.body
   draft = $false
   prerelease = $Prerelease -eq 'true'
   make_latest = $MakeLatest
+  name = [string]$release.name
 } | ConvertTo-Json
 $published = Invoke-RestMethod `
   -Method Patch `
@@ -121,6 +134,7 @@ $published = Invoke-RestMethod `
 
 Assert-DshReleaseIdentity -Release $published -Tag $Tag -ReleaseId $ReleaseId
 Assert-DshReleaseBodySha256 -Release $published -ExpectedSha256 $ExpectedBodySha256
+Assert-DshReleaseNameSha256 -Release $published -ExpectedSha256 $ExpectedNameSha256
 if (Test-DshReleaseIsDraft -Release $published) {
   throw "GitHub left Release $Tag in Draft state"
 }

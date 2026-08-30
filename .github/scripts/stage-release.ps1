@@ -15,6 +15,7 @@ param(
   [string]$PreviousTagName = '',
   [switch]$GenerateReleaseNotes,
   [switch]$AppendGeneratedReleaseNotes,
+  [switch]$RequireExistingTag,
   [switch]$ValidateOnly
 )
 $ErrorActionPreference = 'Stop'
@@ -81,6 +82,7 @@ if ($null -ne $targetRelease -and -not (Test-DshReleaseIsDraft -Release $targetR
   }
   Set-DshGitHubOutput -Name 'release_id' -Value ([string]$targetRelease.id)
   Set-DshGitHubOutput -Name 'body_sha256' -Value (Get-DshTextSha256 -Text ([string]$targetRelease.body))
+  Set-DshGitHubOutput -Name 'name_sha256' -Value (Get-DshTextSha256 -Text ([string]$targetRelease.name))
   Set-DshGitHubOutput -Name 'should_publish' -Value 'false'
   Set-DshGitHubOutput -Name 'skipped' -Value 'true'
   Write-Output "complete public Release already exists; staging skipped: $($targetRelease.html_url)"
@@ -90,12 +92,14 @@ if ($null -ne $targetRelease -and -not (Test-DshReleaseIsDraft -Release $targetR
 if ($null -ne $targetRelease) {
   throw "tag $Tag already has Draft Release $($targetRelease.id); remove that legacy Draft manually before retrying"
 }
-Assert-DshTagCommitSha `
-  -Repository $Repository `
-  -Tag $Tag `
-  -ExpectedSha $TargetCommitish `
-  -Headers $headers `
-  -AllowMissing
+$tagCheck = @{
+  Repository = $Repository
+  Tag = $Tag
+  ExpectedSha = $TargetCommitish
+  Headers = $headers
+}
+if (-not $RequireExistingTag) { $tagCheck.AllowMissing = $true }
+Assert-DshTagCommitSha @tagCheck
 
 $resolvedReleaseName = $ReleaseName
 $resolvedBody = $Body
@@ -118,6 +122,7 @@ if ($GenerateReleaseNotes) {
   }
 }
 $resolvedBodySha256 = Get-DshTextSha256 -Text $resolvedBody
+$resolvedReleaseNameSha256 = Get-DshTextSha256 -Text $resolvedReleaseName
 
 if ($env:GITHUB_RUN_ID -notmatch '^[0-9]+$' -or $env:GITHUB_RUN_ATTEMPT -notmatch '^[0-9]+$') {
   throw 'GITHUB_RUN_ID and GITHUB_RUN_ATTEMPT are required to create an isolated Draft'
@@ -163,6 +168,7 @@ if ($resolvedBody -and [string]$release.body -cne $resolvedBody) {
   throw "Draft Release $Tag has an unexpected body"
 }
 Assert-DshReleaseBodySha256 -Release $release -ExpectedSha256 $resolvedBodySha256
+Assert-DshReleaseNameSha256 -Release $release -ExpectedSha256 $resolvedReleaseNameSha256
 if ($TargetCommitish -and [string]$release.target_commitish -cne $TargetCommitish) {
   throw "Draft Release $Tag has an unexpected target commitish"
 }
@@ -214,9 +220,11 @@ if (-not (Test-DshReleaseIsDraft -Release $release)) {
 }
 Assert-DshRemoteAssets -Release $release -AssetContext $assetContext | Out-Null
 Assert-DshReleaseBodySha256 -Release $release -ExpectedSha256 $resolvedBodySha256
+Assert-DshReleaseNameSha256 -Release $release -ExpectedSha256 $resolvedReleaseNameSha256
 
 Set-DshGitHubOutput -Name 'release_id' -Value $releaseId
 Set-DshGitHubOutput -Name 'body_sha256' -Value $resolvedBodySha256
+Set-DshGitHubOutput -Name 'name_sha256' -Value $resolvedReleaseNameSha256
 Set-DshGitHubOutput -Name 'draft_tag' -Value $draftTag
 Set-DshGitHubOutput -Name 'should_publish' -Value 'true'
 Set-DshGitHubOutput -Name 'skipped' -Value 'false'

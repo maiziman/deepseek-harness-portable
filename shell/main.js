@@ -13,30 +13,24 @@
 //                          screenshot to DSH_SMOKE_OUT, then exit 0.
 //   DSH_SMOKE_OUT=<path>   screenshot destination (default: shell dir).
 //   DSH_SMOKE_PROGRESS_OUT capture the rendered startup progress page too.
+//   DSH_SMOKE_PROGRESS_STATE_OUT write JSON evidence for the rendered component count.
 //   DSH_SMOKE_DELAY_MS     settle time after page load, default 3500.
 //   DSH_DEVTOOLS=1         open detached DevTools.
 'use strict'
 
 const { app, BrowserWindow, dialog, shell: electronShell } = require('electron')
 const { spawn } = require('node:child_process')
-const { createHash } = require('node:crypto')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 const {
-  countProfileLinks,
+  completeStartupMilestones,
+  countPackageProfileLinks,
   loadingPage,
   profileInitializationState,
   stageState,
 } = require('./startup-progress.js')
-const {
-  CAPABILITY_PACKAGE,
-  capabilityBundleRegistered,
-  capabilityInstallArgs,
-  capabilityProfileRegistered,
-  capabilityRepairArgs,
-  dshServerArgs,
-} = require('./launch-args.js')
+const { dshServerArgs, portableDshEnv } = require('./launch-args.js')
 const {
   availableUpdate,
   fetchPublicReleases,
@@ -48,6 +42,7 @@ const { terminateProcessTree } = require('./process-lifecycle.js')
 const SMOKE = process.env.DSH_SMOKE === '1'
 const SMOKE_OUT = process.env.DSH_SMOKE_OUT || path.join(__dirname, 'smoke.png')
 const SMOKE_PROGRESS_OUT = process.env.DSH_SMOKE_PROGRESS_OUT || ''
+const SMOKE_PROGRESS_STATE_OUT = process.env.DSH_SMOKE_PROGRESS_STATE_OUT || ''
 const SMOKE_DELAY_MS = Number(process.env.DSH_SMOKE_DELAY_MS || 3500)
 if (SMOKE) {
   app.disableHardwareAcceleration()
@@ -62,16 +57,7 @@ if (SMOKE) {
 const ROOT = app.isPackaged ? path.dirname(process.execPath) : path.resolve(__dirname, '..')
 const RUNTIME_ROOT = path.join(ROOT, 'runtime')
 const NODE_EXE = path.join(RUNTIME_ROOT, 'node.exe')
-const PNPM_SHIM = path.join(RUNTIME_ROOT, 'pnpm.cmd')
 const DSH_BIN = path.join(ROOT, 'app', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
-const MODEL_CAPABILITIES_ROOT = path.join(
-  ROOT,
-  'app',
-  'node_modules',
-  '@maiziman',
-  'dsh-model-capabilities',
-)
-const MODEL_CAPABILITIES_MANIFEST = path.join(MODEL_CAPABILITIES_ROOT, 'package.json')
 const DSH_HOME = path.join(ROOT, 'dsh-home')
 const WORKSPACE = path.join(ROOT, 'workspace')
 const LOG_PATH = path.join(DSH_HOME, 'logs', 'server.log')
@@ -80,29 +66,14 @@ const UPDATE_STATE_PATH = path.join(DSH_HOME, 'update-state.json')
 const APP_ICON = path.join(__dirname, 'icon.ico')
 const PROFILE_MODULES = path.join(DSH_HOME, 'profiles', 'node_modules')
 const PROFILE_MANIFEST = path.join(DSH_HOME, 'profiles', 'web', 'package.json')
-const PROFILE_BUNDLED_CAPABILITIES_ROOT = path.join(
-  DSH_HOME,
-  'profiles',
-  'web',
-  '.portable-plugins',
-  'dsh-model-capabilities',
-)
-const PROFILE_CAPABILITIES_ROOT = path.join(
-  DSH_HOME,
-  'profiles',
-  'web',
-  'node_modules',
-  '@maiziman',
-  'dsh-model-capabilities',
-)
-const PROFILE_CAPABILITIES_MANIFEST = path.join(PROFILE_CAPABILITIES_ROOT, 'package.json')
+const PACKAGED_MODULES = path.join(ROOT, 'app', 'node_modules')
 
 const URL_PATTERN = /dsh web: (http:\/\/\S+)/
 const STARTUP_STARTED_AT = Date.now()
 const STARTUP_LINK_TOTAL = readStartupLinkTotal()
 let startupInitialLinks = 0
 try {
-  startupInitialLinks = countProfileLinks(PROFILE_MODULES)
+  startupInitialLinks = countPackagedProfileLinks()
 } catch (error) {
   appendLog(`initial startup component count unavailable: ${error.message}`)
 }
@@ -133,136 +104,6 @@ function requireActiveStartup() {
   if (shuttingDown) throw new Error('application shutdown cancelled startup')
 }
 
-function readJsonFile(filename) {
-  return JSON.parse(fs.readFileSync(filename, 'utf8'))
-}
-
-function sameRealPath(left, right) {
-  try {
-    return path.normalize(fs.realpathSync.native(left)).toLowerCase()
-      === path.normalize(fs.realpathSync.native(right)).toLowerCase()
-  } catch {
-    return false
-  }
-}
-
-function capabilityFileNames(manifest) {
-  if (!Array.isArray(manifest.files) || manifest.files.some(name => typeof name !== 'string' || path.basename(name) !== name)) {
-    throw new Error(`${CAPABILITY_PACKAGE} has an invalid publishable file list`)
-  }
-  return [...manifest.files, 'package.json']
-}
-
-function fileDigest(filename) {
-  return createHash('sha256').update(fs.readFileSync(filename)).digest('hex')
-}
-
-function capabilityPayloadCurrent(manifest) {
-  try {
-    return capabilityFileNames(manifest).every(name => (
-      fileDigest(path.join(MODEL_CAPABILITIES_ROOT, name))
-        === fileDigest(path.join(PROFILE_BUNDLED_CAPABILITIES_ROOT, name))
-    ))
-  } catch {
-    return false
-  }
-}
-
-function capabilityPluginCurrent() {
-  try {
-    const expected = readJsonFile(MODEL_CAPABILITIES_MANIFEST)
-    const profile = readJsonFile(PROFILE_MANIFEST)
-    const installed = readJsonFile(PROFILE_CAPABILITIES_MANIFEST)
-    return capabilityBundleRegistered(profile, installed, expected.version)
-      && sameRealPath(PROFILE_CAPABILITIES_ROOT, PROFILE_BUNDLED_CAPABILITIES_ROOT)
-      && capabilityPayloadCurrent(expected)
-  } catch (error) {
-    if (error.code !== 'ENOENT') appendLog(`capability plugin registration will be repaired: ${error.message}`)
-    return false
-  }
-}
-
-function stageCapabilityPlugin() {
-  const manifest = readJsonFile(MODEL_CAPABILITIES_MANIFEST)
-  const names = capabilityFileNames(manifest)
-  fs.mkdirSync(PROFILE_BUNDLED_CAPABILITIES_ROOT, { recursive: true })
-  // The manifest is the version marker checked on the next launch, so copy it
-  // after every payload file. An interrupted refresh is then retried instead
-  // of accepting a partially updated plugin.
-  for (const name of names) {
-    const source = path.join(MODEL_CAPABILITIES_ROOT, name)
-    if (!fs.statSync(source).isFile()) throw new Error(`missing capability plugin file ${source}`)
-    fs.copyFileSync(source, path.join(PROFILE_BUNDLED_CAPABILITIES_ROOT, name))
-  }
-}
-
-function runDshCommand(args, env) {
-  return new Promise((resolve, reject) => {
-    requireActiveStartup()
-    const child = spawn(NODE_EXE, args, {
-      cwd: WORKSPACE,
-      env,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    })
-    serverProcess = child
-    let settled = false
-    let terminating = false
-    let timeout
-    const finish = (error) => {
-      if (settled) return
-      settled = true
-      if (timeout !== undefined) clearTimeout(timeout)
-      if (serverProcess === child) serverProcess = null
-      if (error === undefined) resolve()
-      else reject(error)
-    }
-    const feed = (chunk) => {
-      process.stdout.write(chunk)
-      for (const line of chunk.toString().split(/\r?\n/u)) if (line.trim() !== '') appendLog(line.trim())
-    }
-    child.stdout.on('data', feed)
-    child.stderr.on('data', feed)
-    child.once('error', finish)
-    child.once('exit', (code) => {
-      if (terminating) return
-      finish(code === 0 ? undefined : new Error(`plugin registration failed (code ${String(code)}); see ${LOG_PATH}`))
-    })
-    timeout = setTimeout(() => {
-      terminating = true
-      void terminateProcessTree(child).then((terminated) => {
-        if (!terminated) appendLog(`plugin registration process ${String(child.pid)} did not report exit after forced termination`)
-        finish(new Error(`plugin registration timed out after 120s; see ${LOG_PATH}`))
-      })
-    }, 120000)
-  })
-}
-
-async function ensureCapabilityPlugin(env) {
-  requireActiveStartup()
-  if (!fs.existsSync(MODEL_CAPABILITIES_MANIFEST)) {
-    throw new Error(`missing ${MODEL_CAPABILITIES_MANIFEST}; the portable app install is incomplete`)
-  }
-  if (!fs.existsSync(PNPM_SHIM)) {
-    throw new Error(`missing ${PNPM_SHIM}; the portable app cannot register its capability plugin`)
-  }
-  if (capabilityPluginCurrent()) return
-  let repair = false
-  try {
-    repair = capabilityProfileRegistered(readJsonFile(PROFILE_MANIFEST))
-  } catch (error) {
-    if (error.code !== 'ENOENT') appendLog(`capability plugin profile declaration will be replaced: ${error.message}`)
-  }
-  stageCapabilityPlugin()
-  if (capabilityPluginCurrent()) return
-  appendLog(`registering ${CAPABILITY_PACKAGE} through the official dsh plugin workflow`)
-  await runDshCommand(repair ? capabilityRepairArgs(DSH_BIN) : capabilityInstallArgs(DSH_BIN), env)
-  requireActiveStartup()
-  if (!capabilityPluginCurrent()) {
-    throw new Error(`${CAPABILITY_PACKAGE} registration completed without an active Web-profile Bundle`)
-  }
-}
-
 function readStartupLinkTotal() {
   try {
     const manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'))
@@ -273,6 +114,10 @@ function readStartupLinkTotal() {
     appendLog(`startup component total unavailable: ${error.message}`)
     return 0
   }
+}
+
+function countPackagedProfileLinks() {
+  return countPackageProfileLinks(PROFILE_MODULES, PACKAGED_MODULES, fs)
 }
 
 function setStartupStage(key, options = {}) {
@@ -303,11 +148,12 @@ function watchStartupMilestones() {
   let countErrorReported = false
   const inspect = () => {
     try {
-      const linked = countProfileLinks(PROFILE_MODULES)
+      const linked = countPackagedProfileLinks()
       const state = profileInitializationState(fs.existsSync(PROFILE_MANIFEST), linked, expectedLinks)
       if (state.linksComplete) {
         stopStartupWatcher()
-        void setStartupStage('services')
+        void setStartupStage('links', { linked, total: expectedLinks })
+          .then(() => setStartupStage('services'))
         return
       }
       if (linked > 0 && linked !== lastLinked) {
@@ -330,11 +176,42 @@ function watchStartupMilestones() {
 async function captureStartupProgress() {
   if (!SMOKE || !SMOKE_PROGRESS_OUT || mainWindow === null || mainWindow.isDestroyed()) return
   const targetWindow = mainWindow
-  await new Promise((resolve) => setTimeout(resolve, 500))
+  let rendered = null
+  if (SMOKE_PROGRESS_STATE_OUT) {
+    const deadline = Date.now() + 120000
+    while (Date.now() < deadline && !targetWindow.isDestroyed()) {
+      rendered = await targetWindow.webContents.executeJavaScript(`(() => {
+        const history = globalThis.dshStartupProgress?.history ?? []
+        for (let index = history.length - 1; index >= 0; index -= 1) {
+          const state = history[index]
+          if (state.key === 'links' && state.linked > 0 && state.total === ${STARTUP_LINK_TOTAL}) return state
+        }
+        return null
+      })()`, true)
+      if (rendered?.key === 'links' && rendered.linked > 0 && rendered.total === STARTUP_LINK_TOTAL) break
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+    if (rendered?.key !== 'links' || rendered.linked <= 0 || rendered.total !== STARTUP_LINK_TOTAL) {
+      throw new Error(`startup smoke did not render a measured component count: ${JSON.stringify(rendered)}`)
+    }
+    const snapshotPayload = JSON.stringify(rendered).replace(/</gu, '\\u003c')
+    await targetWindow.webContents.executeJavaScript(`globalThis.dshStartupProgress.snapshot(${snapshotPayload})`, true)
+  } else {
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
   if (targetWindow.isDestroyed()) return
   const image = await targetWindow.webContents.capturePage()
   fs.mkdirSync(path.dirname(SMOKE_PROGRESS_OUT), { recursive: true })
   fs.writeFileSync(SMOKE_PROGRESS_OUT, image.toPNG())
+  if (SMOKE_PROGRESS_STATE_OUT) {
+    fs.mkdirSync(path.dirname(SMOKE_PROGRESS_STATE_OUT), { recursive: true })
+    fs.writeFileSync(SMOKE_PROGRESS_STATE_OUT, `${JSON.stringify({
+      expectedLinks: STARTUP_LINK_TOTAL,
+      firstRun: FIRST_RUN,
+      measuredLinks: countPackagedProfileLinks(),
+      rendered,
+    }, null, 2)}${os.EOL}`, 'utf8')
+  }
   console.log(`dsh-shell smoke: wrote ${SMOKE_PROGRESS_OUT}`)
 }
 
@@ -389,7 +266,7 @@ async function maybePromptForUpdate() {
   const options = isChinese
     ? {
         type: 'info',
-        title: 'DeepSeek Harness Portable 更新',
+        title: 'DeepSeek Harness 纯净便携桌面版更新',
         message: `发现新版本 ${update.version}`,
         detail: `当前便携版本：${currentPortableVersion}\n新便携版本：${update.version}\n\n下载前请在 GitHub Release 中核对 SHA256。更新便携版时请保留 dsh-home 和 workspace。`,
         buttons: ['打开下载页面', '稍后提醒'],
@@ -398,7 +275,7 @@ async function maybePromptForUpdate() {
       }
     : {
         type: 'info',
-        title: 'DeepSeek Harness Portable update',
+        title: 'DeepSeek Harness Pure Portable update',
         message: `Version ${update.version} is available`,
         detail: `Current portable version: ${currentPortableVersion}\nNew portable version: ${update.version}\n\nVerify the SHA256 in the GitHub Release before updating. Preserve dsh-home and workspace when replacing the portable package.`,
         buttons: ['Open download page', 'Remind me later'],
@@ -440,7 +317,7 @@ function shutdown(code) {
 }
 
 function fatal(message) {
-  try { dialog.showErrorBox('DeepSeek Harness', message) } catch { /* no window yet */ }
+  try { dialog.showErrorBox('DeepSeek Harness Pure Portable', message) } catch { /* no window yet */ }
   console.error(`dsh-shell: ${message}`)
   shutdown(1)
 }
@@ -455,11 +332,8 @@ async function startServer() {
   await setStartupStage('runtime')
   requireActiveStartup()
 
-  const env = { ...process.env, DSH_HOME }
-  env.PATH = [RUNTIME_ROOT, env.PATH || ''].join(path.delimiter)
+  const env = portableDshEnv(process.env, DSH_HOME, RUNTIME_ROOT)
   watchStartupMilestones()
-  await ensureCapabilityPlugin(env)
-  requireActiveStartup()
 
   return new Promise((resolve, reject) => {
     requireActiveStartup()
@@ -481,9 +355,17 @@ async function startServer() {
         const match = URL_PATTERN.exec(buffer)
         if (match) {
           child.__urlKnown = true
-          stopStartupWatcher()
-          void setStartupStage('server')
-          resolve(match[1].replace(/\r$/u, ''))
+          void completeStartupMilestones({
+            firstRun: FIRST_RUN,
+            total: STARTUP_LINK_TOTAL,
+            countLinks: countPackagedProfileLinks,
+            stopWatcher: stopStartupWatcher,
+            setStage: setStartupStage,
+            reportError: (error) => appendLog(`final startup component count unavailable: ${error.message}`),
+          }).then(
+            () => resolve(match[1].replace(/\r$/u, '')),
+            reject,
+          )
         }
       }
     }
@@ -523,7 +405,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#101320',
     icon: fs.existsSync(APP_ICON) ? APP_ICON : undefined,
-    title: 'DeepSeek Harness',
+    title: 'DeepSeek Harness Pure Portable',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

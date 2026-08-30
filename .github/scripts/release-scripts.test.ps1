@@ -202,7 +202,8 @@ function Invoke-MockStage {
     [Parameter(Mandatory)][string]$Tag,
     [Parameter(Mandatory)][string]$PackageName,
     [Parameter(Mandatory)][string]$Commit,
-    [Parameter(Mandatory)][string]$RunId
+    [Parameter(Mandatory)][string]$RunId,
+    [switch]$RequireExistingTag
   )
 
   $outputPath = New-MockOutputPath
@@ -215,7 +216,8 @@ function Invoke-MockStage {
     -PackageName $PackageName `
     -AssetsDir $fixtureRoot `
     -TargetCommitish $Commit `
-    -MakeLatest false | Out-Null
+    -MakeLatest false `
+    -RequireExistingTag:$RequireExistingTag | Out-Null
   return Read-MockOutputs -Path $outputPath
 }
 
@@ -226,7 +228,9 @@ function Invoke-MockFinalize {
     [Parameter(Mandatory)][string]$ReleaseId,
     [Parameter(Mandatory)][string]$DraftTag,
     [Parameter(Mandatory)][string]$ExpectedCommit,
-    [string]$ExpectedBodySha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    [string]$ExpectedBodySha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    [string]$ExpectedNameSha256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+    [switch]$RequireExistingTag
   )
 
   $outputPath = New-MockOutputPath
@@ -240,7 +244,9 @@ function Invoke-MockFinalize {
     -DraftTag $DraftTag `
     -ExpectedCommit $ExpectedCommit `
     -ExpectedBodySha256 $ExpectedBodySha256 `
-    -MakeLatest false | Out-Null
+    -ExpectedNameSha256 $ExpectedNameSha256 `
+    -MakeLatest false `
+    -RequireExistingTag:$RequireExistingTag | Out-Null
   return Read-MockOutputs -Path $outputPath
 }
 
@@ -371,8 +377,14 @@ function Invoke-RestMethod {
     }
     $release.tag_name = $targetTag
     $release.target_commitish = [string]$payload.target_commitish
+    if ($null -ne $payload.PSObject.Properties['body']) {
+      $release.body = [string]$payload.body
+    }
     $release.draft = [bool]$payload.draft
     $release.prerelease = [bool]$payload.prerelease
+    if ($null -ne $payload.PSObject.Properties['name']) {
+      $release.name = [string]$payload.name
+    }
     if ([string]$payload.make_latest -eq 'true') {
       $global:DshReleaseScriptsTestApi.LatestId = [string]$release.id
     }
@@ -546,6 +558,20 @@ try {
       }).Count -eq 0) 'tag conflict must not leave a Draft'
   Write-Output 'PASS existing tag commit conflict fails before any write'
 
+  $missingRequiredTag = 'plugin-v-required-tag-missing'
+  Assert-Throws -MessagePattern '*does not resolve to a commit*' -Action {
+    Invoke-MockStage `
+      -Tag $missingRequiredTag `
+      -PackageName $packageName `
+      -Commit $expectedCommit `
+      -RunId '2010' `
+      -RequireExistingTag | Out-Null
+  }
+  Assert-Condition (@($global:DshReleaseScriptsTestApi.Releases | Where-Object {
+        [string]$_.tag_name -like "$missingRequiredTag-draft-*"
+      }).Count -eq 0) 'missing required trigger tag must fail before Draft creation'
+  Write-Output 'PASS tag-triggered staging treats a deleted trigger tag as cancellation'
+
   $recoverTag = 'plugin-v-recover'
   $global:DshReleaseScriptsTestApi.FailUploadCall = $global:DshReleaseScriptsTestApi.UploadCalls + 2
   Assert-Throws -MessagePattern '*simulated upload interruption*' -Action {
@@ -665,6 +691,53 @@ try {
   }
   Assert-Condition ([bool]$bodyDraft.draft) 'body-mismatched Draft must remain private'
   Write-Output 'PASS ExpectedBodySha256 rejects a concurrently edited Draft before publication'
+
+  $nameTag = 'plugin-v-mutated-name'
+  $nameOutputs = Invoke-MockStage `
+    -Tag $nameTag `
+    -PackageName $packageName `
+    -Commit $expectedCommit `
+    -RunId '2011'
+  $nameDraft = Get-MockReleaseById -ReleaseId $nameOutputs.release_id
+  $nameDraftTag = [string]$nameDraft.tag_name
+  $nameDraft.name = 'concurrently changed name'
+  Assert-Throws -MessagePattern '*name changed*' -Action {
+    Invoke-MockFinalize `
+      -Tag $nameTag `
+      -PackageName $packageName `
+      -ReleaseId ([string]$nameDraft.id) `
+      -DraftTag $nameDraftTag `
+      -ExpectedCommit $expectedCommit `
+      -ExpectedNameSha256 $nameOutputs.name_sha256 | Out-Null
+  }
+  Assert-Condition ([bool]$nameDraft.draft) 'name-mismatched Draft must remain private'
+  Write-Output 'PASS ExpectedNameSha256 rejects a concurrently edited Draft before publication'
+
+  $revokedTag = 'plugin-v-revoked-trigger'
+  $global:DshReleaseScriptsTestApi.Refs[$revokedTag] = $expectedCommit
+  $revokedOutputs = Invoke-MockStage `
+    -Tag $revokedTag `
+    -PackageName $packageName `
+    -Commit $expectedCommit `
+    -RunId '2012' `
+    -RequireExistingTag
+  $revokedDraft = Get-MockReleaseById -ReleaseId $revokedOutputs.release_id
+  $revokedDraftTag = [string]$revokedDraft.tag_name
+  $global:DshReleaseScriptsTestApi.Refs.Remove($revokedTag)
+  $patchesBeforeRevocation = $global:DshReleaseScriptsTestApi.PatchIds.Count
+  Assert-Throws -MessagePattern '*does not resolve to a commit*' -Action {
+    Invoke-MockFinalize `
+      -Tag $revokedTag `
+      -PackageName $packageName `
+      -ReleaseId ([string]$revokedDraft.id) `
+      -DraftTag $revokedDraftTag `
+      -ExpectedCommit $expectedCommit `
+      -ExpectedNameSha256 $revokedOutputs.name_sha256 `
+      -RequireExistingTag | Out-Null
+  }
+  Assert-Equal $patchesBeforeRevocation $global:DshReleaseScriptsTestApi.PatchIds.Count 'deleted trigger tag must fail before PATCH'
+  Assert-Condition ([bool]$revokedDraft.draft) 'revoked tag must leave the isolated Draft private'
+  Write-Output 'PASS tag-triggered finalization treats trigger-tag deletion as cancellation'
 
   $raceTag = 'plugin-v-release-race'
   $raceOutputs = Invoke-MockStage `
