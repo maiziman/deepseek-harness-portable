@@ -613,12 +613,12 @@ $sensitiveBuildPaths = @(
   $build,
   $profile,
   $scratch,
-  $env:TEMP,
-  $env:USERPROFILE,
-  $env:RUNNER_TEMP,
   $env:RUNNER_WORKSPACE,
   $env:GITHUB_WORKSPACE
 )
+# Scan build-owned locations, not machine-wide home or temporary-directory
+# prefixes. Third-party native binaries can legitimately retain those generic
+# prefixes from their own upstream CI build.
 if ($packageInputPath) { $sensitiveBuildPaths += $packageInputPath }
 $pathScan = Assert-DshPortableTreeHasNoSensitivePaths `
   -Root $pkg `
