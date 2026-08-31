@@ -4,5 +4,5 @@ contact_links:
     url: https://github.com/deepseek-ai/deepseek-harness/issues
     about: Report product behavior that also occurs with the official npm installation.
   - name: Private security report
-    url: https://github.com/maiziman/deepseek-harness-portable/security/advisories/new
+    url: https://github.com/maiziman/cedardsh-desktop/security/advisories/new
     about: Report vulnerabilities privately instead of opening a public issue.

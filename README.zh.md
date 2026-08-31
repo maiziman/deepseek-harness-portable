@@ -3,14 +3,14 @@
 <p align="center"><strong>DeepSeek Harness Windows 桌面版：下载一个 ZIP，解压就能运行。</strong></p>
 
 <p align="center">
-  <a href="https://github.com/maiziman/deepseek-harness-portable/releases/latest"><strong>下载 Windows 版</strong></a>
+  <a href="https://github.com/maiziman/cedardsh-desktop/releases/latest"><strong>下载 Windows 版</strong></a>
   · <a href="README.md">English</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/maiziman/deepseek-harness-portable/actions"><img alt="Windows 验证" src="https://img.shields.io/github/actions/workflow/status/maiziman/deepseek-harness-portable/portable-verify.yml?branch=main&amp;label=Windows%20verified"></a>
-  <a href="https://github.com/maiziman/deepseek-harness-portable/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/maiziman/deepseek-harness-portable?include_prereleases"></a>
-  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/maiziman/deepseek-harness-portable"></a>
+  <a href="https://github.com/maiziman/cedardsh-desktop/actions"><img alt="Windows 验证" src="https://img.shields.io/github/actions/workflow/status/maiziman/cedardsh-desktop/portable-verify.yml?branch=main&amp;label=Windows%20verified"></a>
+  <a href="https://github.com/maiziman/cedardsh-desktop/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/maiziman/cedardsh-desktop?include_prereleases"></a>
+  <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/maiziman/cedardsh-desktop"></a>
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-10%2F11%20x64-0078d4?logo=windows11">
 </p>
 
@@ -20,7 +20,7 @@
 
 ## 三步开始使用
 
-1. 从 [Releases](https://github.com/maiziman/deepseek-harness-portable/releases/latest) 下载 `DeepSeek-Harness-win64-v<版本>.zip`。
+1. 从 [Releases](https://github.com/maiziman/cedardsh-desktop/releases/latest) 下载 `DeepSeek-Harness-win64-v<版本>.zip`。
 2. 将整个 ZIP 解压到较短的路径，例如 `C:\Tools\CedarDSH`。
 3. 双击 `DeepSeek-Harness.exe`，添加模型提供方、选择工作区，然后开始会话。
 
@@ -59,7 +59,7 @@
 
 在 Windows 10 或更高版本、PowerShell 7.2 或更高版本中运行 `./build-portable.ps1`。构建会生成 ZIP 和 `SHA256SUMS.txt`；`manifest.json` 会记录 CedarDSH Desktop 版本、包内 DSH 版本、上游源码标签与提交以及运行时哈希。
 
-源码来源和发布验证见[构建与验证](docs/BUILDING.zh.md)。打包问题请在本项目[提交 Issue](https://github.com/maiziman/deepseek-harness-portable/issues)；DeepSeek Harness 本身的问题请提交到[上游项目](https://github.com/deepseek-ai/deepseek-harness/issues)。
+源码来源和发布验证见[构建与验证](docs/BUILDING.zh.md)。打包问题请在本项目[提交 Issue](https://github.com/maiziman/cedardsh-desktop/issues)；DeepSeek Harness 本身的问题请提交到[上游项目](https://github.com/deepseek-ai/deepseek-harness/issues)。
 
 ## 许可证
 

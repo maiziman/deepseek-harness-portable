@@ -3,14 +3,14 @@
 <p align="center"><strong>DeepSeek Harness for Windows. Download one ZIP, extract it, and run.</strong></p>
 
 <p align="center">
-  <a href="https://github.com/maiziman/deepseek-harness-portable/releases/latest"><strong>Download for Windows</strong></a>
+  <a href="https://github.com/maiziman/cedardsh-desktop/releases/latest"><strong>Download for Windows</strong></a>
   · <a href="README.zh.md">中文说明</a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/maiziman/deepseek-harness-portable/actions"><img alt="Windows verification" src="https://img.shields.io/github/actions/workflow/status/maiziman/deepseek-harness-portable/portable-verify.yml?branch=main&amp;label=Windows%20verified"></a>
-  <a href="https://github.com/maiziman/deepseek-harness-portable/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/maiziman/deepseek-harness-portable?include_prereleases"></a>
-  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/maiziman/deepseek-harness-portable"></a>
+  <a href="https://github.com/maiziman/cedardsh-desktop/actions"><img alt="Windows verification" src="https://img.shields.io/github/actions/workflow/status/maiziman/cedardsh-desktop/portable-verify.yml?branch=main&amp;label=Windows%20verified"></a>
+  <a href="https://github.com/maiziman/cedardsh-desktop/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/maiziman/cedardsh-desktop?include_prereleases"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/github/license/maiziman/cedardsh-desktop"></a>
   <img alt="Windows x64" src="https://img.shields.io/badge/Windows-10%2F11%20x64-0078d4?logo=windows11">
 </p>
 
@@ -20,7 +20,7 @@
 
 ## Start in three steps
 
-1. Download `DeepSeek-Harness-win64-v<version>.zip` from [Releases](https://github.com/maiziman/deepseek-harness-portable/releases/latest).
+1. Download `DeepSeek-Harness-win64-v<version>.zip` from [Releases](https://github.com/maiziman/cedardsh-desktop/releases/latest).
 2. Extract the whole ZIP to a short path such as `C:\Tools\CedarDSH`.
 3. Double-click `DeepSeek-Harness.exe`, add your model provider, choose a workspace, and start a session.
 
@@ -59,7 +59,7 @@ Need a custom OpenAI-compatible model to report whether it supports reasoning or
 
 Run `./build-portable.ps1` on Windows 10 or later with PowerShell 7.2 or later. The build produces the ZIP and `SHA256SUMS.txt`; `manifest.json` records the CedarDSH Desktop version, packaged DSH version, upstream source tag and commit, and runtime hashes.
 
-See [Building and verification](docs/BUILDING.md) for provenance and release details. Packaging issues belong in this repository's [issue tracker](https://github.com/maiziman/deepseek-harness-portable/issues); DeepSeek Harness issues belong in the [upstream tracker](https://github.com/deepseek-ai/deepseek-harness/issues).
+See [Building and verification](docs/BUILDING.md) for provenance and release details. Packaging issues belong in this repository's [issue tracker](https://github.com/maiziman/cedardsh-desktop/issues); DeepSeek Harness issues belong in the [upstream tracker](https://github.com/deepseek-ai/deepseek-harness/issues).
 
 ## License
 

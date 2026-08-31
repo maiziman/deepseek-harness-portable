@@ -5,8 +5,8 @@
 
 const https = require('node:https')
 
-const RELEASES_URL = 'https://api.github.com/repos/maiziman/deepseek-harness-portable/releases'
-const RELEASE_PATH_PREFIX = '/maiziman/deepseek-harness-portable/releases/'
+const RELEASES_URL = 'https://api.github.com/repos/maiziman/cedardsh-desktop/releases'
+const RELEASE_PATH_PREFIX = '/maiziman/cedardsh-desktop/releases/'
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 10000
 const MAX_RESPONSE_BYTES = 1024 * 1024

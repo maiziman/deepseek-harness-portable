@@ -498,7 +498,7 @@ $manifest = [ordered]@{
   pnpmVersion = $pnpmVersion
   pnpmPackageSha256 = $pnpmSha256
   electronVersion = $ElectronVersion
-  updateFeed = 'https://github.com/maiziman/deepseek-harness-portable/releases'
+  updateFeed = 'https://github.com/maiziman/cedardsh-desktop/releases'
   dshSource = if ($officialPackageInput) {
     [ordered]@{
       kind = 'official-git-tag'

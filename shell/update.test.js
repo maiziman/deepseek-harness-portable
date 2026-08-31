@@ -18,7 +18,7 @@ const {
 function release(version, options = {}) {
   return {
     draft: options.draft === true,
-    html_url: options.url || `https://github.com/maiziman/deepseek-harness-portable/releases/tag/v${version}`,
+    html_url: options.url || `https://github.com/maiziman/cedardsh-desktop/releases/tag/v${version}`,
     tag_name: options.tag || `v${version}`,
     name: options.name || `CedarDSH Desktop ${version}`,
     assets: [
@@ -53,7 +53,7 @@ test('packaged portable version uses the new field and supports legacy manifests
 test('release selection ignores drafts, foreign URLs, and malformed assets', () => {
   const unrelatedRelease = {
     draft: false,
-    html_url: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/tools-v0.1.0',
+    html_url: 'https://github.com/maiziman/cedardsh-desktop/releases/tag/tools-v0.1.0',
     tag_name: 'tools-v0.1.0',
     name: 'Auxiliary tool v0.1.0',
     assets: [
@@ -72,10 +72,10 @@ test('release selection ignores drafts, foreign URLs, and malformed assets', () 
   ]
   assert.deepEqual(selectLatestRelease(releases), {
     version: '0.1.1-rc.3',
-    releaseUrl: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/v0.1.1-rc.3',
+    releaseUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/tag/v0.1.1-rc.3',
     releaseName: 'CedarDSH Desktop 0.1.1-rc.3',
   })
-  assert.equal(isTrustedReleaseUrl('https://github.com/maiziman/deepseek-harness-portable/releases/tag/v1'), true)
+  assert.equal(isTrustedReleaseUrl('https://github.com/maiziman/cedardsh-desktop/releases/tag/v1'), true)
   assert.equal(isTrustedReleaseUrl('https://github.com/another/repository/releases/tag/v1'), false)
   assert.equal(selectLatestRelease([unrelatedRelease]), null)
 })
@@ -92,7 +92,7 @@ test('release selection rejects portable releases with extra assets', () => {
 test('release selection requires matching tag and complete asset records', () => {
   assert.equal(selectLatestRelease([release('1.2.1', { tag: 'v1.2.0' })]), null)
   assert.equal(selectLatestRelease([release('1.2.1', {
-    url: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/v1.2.0',
+    url: 'https://github.com/maiziman/cedardsh-desktop/releases/tag/v1.2.0',
   })]), null)
   const incomplete = release('1.2.1')
   incomplete.assets[0] = { ...incomplete.assets[0], digest: null }
@@ -102,7 +102,7 @@ test('release selection requires matching tag and complete asset records', () =>
 test('release pagination reaches a portable package after a full unrelated page', async () => {
   const unrelatedPage = Array.from({ length: 100 }, (_, index) => ({
     draft: false,
-    html_url: `https://github.com/maiziman/deepseek-harness-portable/releases/tag/tool-${index}`,
+    html_url: `https://github.com/maiziman/cedardsh-desktop/releases/tag/tool-${index}`,
     name: `Tool ${index}`,
     assets: [{ name: `tool-${index}.tgz` }, { name: 'SHA256SUMS.txt' }],
   }))

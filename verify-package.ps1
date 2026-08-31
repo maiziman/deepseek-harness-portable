@@ -171,7 +171,7 @@ if ($LASTEXITCODE -ne 0 -or $pnpmVer -cne [string]$manifest.pnpmVersion -or
   [string]$manifest.pnpmPackageSha256 -cnotmatch '^[0-9a-f]{64}$') {
   throw "pinned plugin package manager mismatch: runtime $pnpmVer / package $($pnpmManifest.version) / manifest $($manifest.pnpmVersion)"
 }
-if ($manifest.updateFeed -ne 'https://github.com/maiziman/deepseek-harness-portable/releases') { throw "unexpected update feed: $($manifest.updateFeed)" }
+if ($manifest.updateFeed -ne 'https://github.com/maiziman/cedardsh-desktop/releases') { throw "unexpected update feed: $($manifest.updateFeed)" }
 if ($manifest.startupProfileLinkCount -le 0) { throw 'manifest has no startup profile component total' }
 $modelCapabilitiesRoot = Join-Path $pkgRoot 'app\node_modules\@maiziman\dsh-model-capabilities'
 if (Test-Path -LiteralPath $modelCapabilitiesRoot) { throw 'pure portable package unexpectedly contains the optional capability plugin' }
