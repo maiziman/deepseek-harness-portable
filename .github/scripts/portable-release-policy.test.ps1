@@ -24,6 +24,7 @@ function New-TestRelease {
   param(
     [Parameter(Mandatory)][string]$Tag,
     [Parameter(Mandatory)][string]$ZipVersion,
+    [string]$AssetPrefix = 'CedarDSH-Desktop',
     [string]$Body = '',
     [bool]$Draft = $false,
     [bool]$Prerelease = $false,
@@ -31,7 +32,7 @@ function New-TestRelease {
   )
   return [pscustomobject]@{
     assets = @(
-      (New-TestAsset -Name "DeepSeek-Harness-win64-v$ZipVersion.zip")
+      (New-TestAsset -Name "$AssetPrefix-win64-v$ZipVersion.zip")
       (New-TestAsset -Name 'SHA256SUMS.txt')
     )
     body = $Body
@@ -69,9 +70,9 @@ Assert-Throws -Pattern '*ambiguous highest semantic-version precedence*' -Action
 }
 Write-Output 'PASS highest semantic-version selection rejects build-metadata ambiguity'
 
-$legacy100 = New-TestRelease -Tag 'v1.0.0' -ZipVersion '0.1.1-rc.2'
-$legacy110 = New-TestRelease -Tag 'v1.1.0' -ZipVersion '0.1.1-rc.2'
-$legacy = New-TestRelease -Tag 'v1.2.0' -ZipVersion '0.1.1-rc.2'
+$legacy100 = New-TestRelease -Tag 'v1.0.0' -ZipVersion '0.1.1-rc.2' -AssetPrefix 'DeepSeek-Harness'
+$legacy110 = New-TestRelease -Tag 'v1.1.0' -ZipVersion '0.1.1-rc.2' -AssetPrefix 'DeepSeek-Harness'
+$legacy = New-TestRelease -Tag 'v1.2.0' -ZipVersion '0.1.1-rc.2' -AssetPrefix 'DeepSeek-Harness'
 $legacyCompatibility = Get-DshCompletePortableReleases -Releases @($legacy100, $legacy110, $legacy)
 Assert-Equal 3 $legacyCompatibility.Count 'all three published migration Releases must remain readable'
 Write-Output 'PASS v1.0.0, v1.1.0, and v1.2.0 keep their exact historical ZIP identity'
@@ -80,13 +81,13 @@ $allocation = Resolve-DshPortableReleasePolicy -Releases @($legacy) -DshVersion 
 Assert-Equal $false $allocation.AlreadyPackaged 'legacy Release must remain only a version floor'
 Assert-Equal '1.2.1' $allocation.PortableVersion 'legacy v1.2.0 must allocate the next portable patch'
 Assert-Equal 'v1.2.1' $allocation.ReleaseTag 'automatic Releases must join the v* family'
-Assert-Equal 'DeepSeek-Harness-win64-v1.2.1.zip' $allocation.AssetName 'ZIP must match the portable tag'
+Assert-Equal 'CedarDSH-Desktop-win64-v1.2.1.zip' $allocation.AssetName 'ZIP must match the portable tag'
 Write-Output 'PASS legacy v1.2.0 allocates v1.2.1 with matching ZIP identity'
 
 $sourceMarkers = "<!-- upstream-source-tag: dsh-v0.1.2-alpha.1 -->`n<!-- upstream-source-sha: 2222222222222222222222222222222222222222 -->"
 $body121 = "<!-- portable-version: 1.2.1 -->`n<!-- dsh-version: 0.1.2-alpha.1 -->`n$sourceMarkers"
 $body122 = "<!-- portable-version: 1.2.2 -->`n<!-- dsh-version: 0.1.2-alpha.1 -->`n$sourceMarkers"
-$release121 = New-TestRelease -Tag 'v1.2.1' -ZipVersion '1.2.1' -Body $body121
+$release121 = New-TestRelease -Tag 'v1.2.1' -ZipVersion '1.2.1' -AssetPrefix 'DeepSeek-Harness' -Body $body121
 $release122 = New-TestRelease -Tag 'v1.2.2' -ZipVersion '1.2.2' -Body $body122
 $mapped = Resolve-DshPortableReleasePolicy `
   -Releases @($legacy, $release121, $release122) `
@@ -127,6 +128,7 @@ $legacyDshBody = '<!-- dsh-version: 0.1.1-rc.2 -->'
 $legacyDshRelease = New-TestRelease `
   -Tag 'dsh-v0.1.1-rc.2' `
   -ZipVersion '0.1.1-rc.2' `
+  -AssetPrefix 'DeepSeek-Harness' `
   -Body $legacyDshBody `
   -Prerelease $true
 $legacyDshMapping = Resolve-DshPortableReleasePolicy `
@@ -164,14 +166,14 @@ Assert-Throws -Pattern '*incomplete asset set*' -Action {
 }
 Write-Output 'PASS future public Release assets require uploaded state, positive size, and SHA256 digest records'
 
-$damagedLegacy = New-TestRelease -Tag 'v1.2.0' -ZipVersion '0.1.1-rc.2'
+$damagedLegacy = New-TestRelease -Tag 'v1.2.0' -ZipVersion '0.1.1-rc.2' -AssetPrefix 'DeepSeek-Harness'
 $damagedLegacy.assets[0].state = 'new'
 Assert-Throws -Pattern '*incomplete asset set*' -Action {
   Resolve-DshPortableReleasePolicy -Releases @($damagedLegacy) -DshVersion '0.1.2-alpha.1' | Out-Null
 }
 Write-Output 'PASS the historical version floor still requires complete asset records'
 
-$wrongLegacy = New-TestRelease -Tag 'v1.2.0' -ZipVersion '0.1.0'
+$wrongLegacy = New-TestRelease -Tag 'v1.2.0' -ZipVersion '0.1.0' -AssetPrefix 'DeepSeek-Harness'
 Assert-Throws -Pattern '*unexpected ZIP version*' -Action {
   Resolve-DshPortableReleasePolicy -Releases @($wrongLegacy) -DshVersion '0.1.2-alpha.1' | Out-Null
 }

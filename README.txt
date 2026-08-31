@@ -5,7 +5,7 @@ CedarDSH Desktop（Windows x64 便携版）
 
 快速开始
 1. 将整个文件夹解压到较短的位置，例如 C:\Tools\CedarDSH。
-2. 双击 DeepSeek-Harness.exe。
+2. 双击 CedarDSH-Desktop.exe。
 3. 添加模型提供方，选择工作区，然后开始会话。
 
 无需 Node.js、安装程序或管理员权限。

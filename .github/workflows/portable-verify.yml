@@ -127,7 +127,7 @@ jobs:
               }
             }
           }
-          $assetName = "DeepSeek-Harness-win64-v$portableVersion.zip"
+          $assetName = "CedarDSH-Desktop-win64-v$portableVersion.zip"
           "asset_name=$assetName" >> $env:GITHUB_OUTPUT
           "dsh_version=$version" >> $env:GITHUB_OUTPUT
           "portable_version=$portableVersion" >> $env:GITHUB_OUTPUT
@@ -354,7 +354,7 @@ jobs:
             <!-- upstream-source-sha: ${{ needs.resolve-dsh-version.outputs.source_sha }} -->
             **CedarDSH Desktop: download one ZIP, extract it, and run DeepSeek Harness on Windows.**
 
-            This release contains DSH `${{ needs.resolve-dsh-version.outputs.dsh_version }}` from `${{ needs.resolve-dsh-version.outputs.source_tag }}`. Download the ZIP, extract it, and double-click `DeepSeek-Harness.exe`. No Node.js, installer, or administrator access is required.
+            This release contains DSH `${{ needs.resolve-dsh-version.outputs.dsh_version }}` from `${{ needs.resolve-dsh-version.outputs.source_tag }}`. Download the ZIP, extract it, and double-click `CedarDSH-Desktop.exe`. No Node.js, installer, or administrator access is required.
 
             Settings and sessions stay in the portable `dsh-home` folder. The ZIP contains no optional plugins. It passed real UI boot checks on Windows Server 2022 and 2025; verify it against `SHA256SUMS.txt`.
         run: |

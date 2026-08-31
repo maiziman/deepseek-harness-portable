@@ -16,13 +16,14 @@ const {
 } = require('./update.js')
 
 function release(version, options = {}) {
+  const assetPrefix = options.assetPrefix || 'CedarDSH-Desktop'
   return {
     draft: options.draft === true,
     html_url: options.url || `https://github.com/maiziman/cedardsh-desktop/releases/tag/v${version}`,
     tag_name: options.tag || `v${version}`,
     name: options.name || `CedarDSH Desktop ${version}`,
     assets: [
-      { name: `DeepSeek-Harness-win64-v${version}.zip`, state: 'uploaded', size: 1024, digest: `sha256:${'a'.repeat(64)}` },
+      { name: `${assetPrefix}-win64-v${version}.zip`, state: 'uploaded', size: 1024, digest: `sha256:${'a'.repeat(64)}` },
       { name: 'SHA256SUMS.txt', state: 'uploaded', size: 96, digest: `sha256:${'b'.repeat(64)}` },
     ],
   }
@@ -83,6 +84,7 @@ test('release selection ignores drafts, foreign URLs, and malformed assets', () 
 test('an update is offered only for a newer public portable package', () => {
   assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.2')]), null)
   assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.3')]).version, '0.1.1-rc.3')
+  assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.3', { assetPrefix: 'DeepSeek-Harness' })]).version, '0.1.1-rc.3')
 })
 
 test('release selection rejects portable releases with extra assets', () => {

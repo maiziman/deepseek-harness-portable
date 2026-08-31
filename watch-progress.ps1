@@ -25,8 +25,8 @@ while ($true) {
   $npmLog = Get-ChildItem "$env:LOCALAPPDATA\npm-cache\_logs" -Filter *.log | Sort-Object LastWriteTime -Descending | Select-Object -First 1
   $npmLogTime = if ($npmLog) { $npmLog.LastWriteTime.ToString('HH:mm:ss') } else { '-' }
   $stage = 'installing dsh deps'
-  if (Test-Path (Join-Path $profile 'DeepSeek-Harness\DeepSeek-Harness.exe')) { $stage = 'assembling / zipping' }
-  elseif (Test-Path (Join-Path $profile 'DeepSeek-Harness.exe')) { $stage = 'electron packager' }
+  if (Test-Path (Join-Path $profile 'CedarDSH-Desktop\CedarDSH-Desktop.exe')) { $stage = 'assembling / zipping' }
+  elseif (Test-Path (Join-Path $profile 'CedarDSH Desktop-win32-x64\CedarDSH-Desktop.exe')) { $stage = 'electron packager' }
   elseif (Test-Path (Join-Path $env:TEMP 'dsh-portable-build\tools\node_modules\electron')) { $stage = 'loading electron tools' }
   elseif ($stats.Files -gt 0) { $stage = 'extracting packages' }
   $line = "{0}  files={1}  size={2} MB  npmLog={3}  stage={4}" -f (Get-Date -Format HH:mm:ss), $stats.Files, $stats.MB, $npmLogTime, $stage

@@ -1,9 +1,9 @@
 # Build the CedarDSH Desktop portable package for Windows x64.
 #
-# Produces: dist\DeepSeek-Harness-win64-v<portable-version>.zip (+ SHA256SUMS.txt)
+# Produces: dist\CedarDSH-Desktop-win64-v<portable-version>.zip (+ SHA256SUMS.txt)
 #
-# The package layout (zip root: DeepSeek-Harness\):
-#   DeepSeek-Harness.exe   Electron shell; double-click entry point
+# The package layout (zip root: CedarDSH-Desktop\):
+#   CedarDSH-Desktop.exe   Electron shell; double-click entry point
 #   resources\app\...      shell sources (main.js)
 #   runtime\               official Node.js win-x64 plus pinned pnpm for optional plugin management
 #   app\node_modules\      production install of @deepseek-ai/dsh and deps
@@ -454,17 +454,17 @@ if (-not $packagerCli) { throw '@electron/packager bin not found under shell-too
 & (Join-Path $build 'runtime\node.exe') $packagerCli $stagingShell `
   --platform win32 --arch x64 --out $profile --overwrite `
   --icon $stagedIcon `
-  --executable-name 'DeepSeek-Harness' `
+  --executable-name 'CedarDSH-Desktop' `
   "--win32metadata.ProductName=$productName" `
   "--win32metadata.FileDescription=$productName" `
-  '--win32metadata.OriginalFilename=DeepSeek-Harness.exe' `
-  '--win32metadata.InternalName=DeepSeek-Harness' `
+  '--win32metadata.OriginalFilename=CedarDSH-Desktop.exe' `
+  '--win32metadata.InternalName=CedarDSH-Desktop' `
   --electron-version $ElectronVersion --electron-zip-dir $electronZip.DirectoryName `
   --app-version $PortableVersion --no-prune
 if ($LASTEXITCODE -ne 0) { throw "electron-packager failed (exit $LASTEXITCODE)" }
 $packed = Join-Path $profile "$productName-win32-x64"
 if (-not (Test-Path $packed)) { throw "packager output missing: $packed" }
-$packedExe = Join-Path $packed 'DeepSeek-Harness.exe'
+$packedExe = Join-Path $packed 'CedarDSH-Desktop.exe'
 if (-not (Test-Path $packedExe -PathType Leaf)) { throw "packaged exe missing: $packedExe" }
 
 $iconVerifier = Join-Path $psRoot '.github\scripts\verify-exe-icon.mjs'
@@ -475,9 +475,9 @@ if (-not (Test-Path $reseditModule -PathType Leaf)) { throw "resedit module miss
 if ($LASTEXITCODE -ne 0) { throw "packaged exe icon verification failed (exit $LASTEXITCODE)" }
 
 # ── 6. assemble the portable tree ────────────────────────────────────────────
-$pkg = Join-Path $profile 'DeepSeek-Harness'
+$pkg = Join-Path $profile 'CedarDSH-Desktop'
 Rename-Item $packed $pkg
-$exe = Join-Path $pkg 'DeepSeek-Harness.exe'
+$exe = Join-Path $pkg 'CedarDSH-Desktop.exe'
 if (-not (Test-Path $exe)) { throw "packaged exe missing: $exe" }
 
 Copy-Item -Recurse -Force (Join-Path $build 'runtime') (Join-Path $pkg 'runtime')
@@ -528,13 +528,13 @@ $manifest = [ordered]@{
   builtAt = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
   runtimeSource = if ((Test-Path (Join-Path $runtimeSrc 'node.exe')) -and -not $ForceDownloadNode) { 'local-reuse' } else { 'https://nodejs.org/dist/' }
   nodeExeSha256 = (Get-FileHash (Join-Path $pkg 'runtime\node.exe') -Algorithm SHA256).Hash.ToLower()
-  shellExeSha256 = (Get-FileHash (Join-Path $pkg 'DeepSeek-Harness.exe') -Algorithm SHA256).Hash.ToLower()
+  shellExeSha256 = (Get-FileHash (Join-Path $pkg 'CedarDSH-Desktop.exe') -Algorithm SHA256).Hash.ToLower()
 }
 $manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $pkg 'manifest.json')
 
 # ── 7. smoke test: boot the UI headless and capture a screenshot ─────────────
 if (-not $SkipSmoke) {
-  Write-Output '=== smoke: launching DeepSeek-Harness.exe ==='
+  Write-Output '=== smoke: launching CedarDSH-Desktop.exe ==='
   $smokeOut = Join-Path $build 'smoke.png'
   $startupSmokeOut = Join-Path $build 'startup-progress.png'
   $envOld = @{
@@ -548,7 +548,7 @@ if (-not $SkipSmoke) {
     $env:DSH_SMOKE_OUT = $smokeOut
     $env:DSH_SMOKE_PROGRESS_OUT = $startupSmokeOut
     $env:DSH_SMOKE_PROGRESS_STATE_OUT = ''
-    $proc = Start-Process -FilePath (Join-Path $pkg 'DeepSeek-Harness.exe') -WorkingDirectory $pkg -PassThru
+    $proc = Start-Process -FilePath (Join-Path $pkg 'CedarDSH-Desktop.exe') -WorkingDirectory $pkg -PassThru
     $smokeTimeoutMs = 270000
     if (-not $proc.WaitForExit($smokeTimeoutMs)) {
       $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
@@ -626,15 +626,15 @@ $pathScan = Assert-DshPortableTreeHasNoSensitivePaths `
 Write-Output "=== build path scan: $($pathScan.Files) files against $($pathScan.Patterns) sensitive forms ==="
 
 # ── 8. zip + checksums ───────────────────────────────────────────────────────
-$zipName = "DeepSeek-Harness-win64-v$PortableVersion.zip"
+$zipName = "CedarDSH-Desktop-win64-v$PortableVersion.zip"
 $zipPath = Join-Path $dist $zipName
 Write-Output "=== zipping $zipName ==="
 if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
 if (Get-Command tar -ErrorAction SilentlyContinue) {
-  tar -a -c -f $zipPath -C $profile 'DeepSeek-Harness'
+  tar -a -c -f $zipPath -C $profile 'CedarDSH-Desktop'
   if ($LASTEXITCODE -ne 0) { throw "zip creation via tar failed (exit $LASTEXITCODE)" }
 } else {
-  Compress-Archive -Path (Join-Path $profile 'DeepSeek-Harness') -DestinationPath $zipPath -CompressionLevel Optimal
+  Compress-Archive -Path (Join-Path $profile 'CedarDSH-Desktop') -DestinationPath $zipPath -CompressionLevel Optimal
 }
 $sha = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
 "$sha  $zipName" | Set-Content (Join-Path $dist 'SHA256SUMS.txt')

@@ -62,10 +62,10 @@ New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 if (Get-Command tar -ErrorAction SilentlyContinue) { tar -xf $ZipPath -C $WorkDir }
 else { Expand-Archive -Path $ZipPath -DestinationPath $WorkDir -Force }
 $topLevel = @(Get-ChildItem -LiteralPath $WorkDir -Force)
-if ($topLevel.Count -ne 1 -or -not $topLevel[0].PSIsContainer -or $topLevel[0].Name -cne 'DeepSeek-Harness') {
-  throw 'ZIP must contain exactly one DeepSeek-Harness top-level directory'
+if ($topLevel.Count -ne 1 -or -not $topLevel[0].PSIsContainer -or $topLevel[0].Name -cne 'CedarDSH-Desktop') {
+  throw 'ZIP must contain exactly one CedarDSH-Desktop top-level directory'
 }
-$pkgRoot = Join-Path $WorkDir 'DeepSeek-Harness'
+$pkgRoot = Join-Path $WorkDir 'CedarDSH-Desktop'
 $reparsePoints = @(
   @(
     Get-Item -LiteralPath $pkgRoot -Force
@@ -79,13 +79,13 @@ $dshHome = Join-Path $pkgRoot 'dsh-home'
 if (-not (Test-Path -LiteralPath $dshHome -PathType Container) -or @(Get-ChildItem -LiteralPath $dshHome -Force).Count -ne 0) {
   throw 'packaged dsh-home must exist and be completely empty before first launch'
 }
-$exe = Join-Path $pkgRoot 'DeepSeek-Harness.exe'
+$exe = Join-Path $pkgRoot 'CedarDSH-Desktop.exe'
 if (-not (Test-Path $exe)) { throw "extraction incomplete: $exe missing" }
 $exeVersion = (Get-Item -LiteralPath $exe).VersionInfo
 if ([string]$exeVersion.ProductName -cne 'CedarDSH Desktop' -or
   [string]$exeVersion.FileDescription -cne 'CedarDSH Desktop' -or
-  [string]$exeVersion.OriginalFilename -cne 'DeepSeek-Harness.exe' -or
-  [string]$exeVersion.InternalName -cne 'DeepSeek-Harness') {
+  [string]$exeVersion.OriginalFilename -cne 'CedarDSH-Desktop.exe' -or
+  [string]$exeVersion.InternalName -cne 'CedarDSH-Desktop') {
   throw "EXE branding metadata is inconsistent: $($exeVersion | Select-Object ProductName, FileDescription, OriginalFilename, InternalName | ConvertTo-Json -Compress)"
 }
 $shellArchive = Join-Path $pkgRoot 'resources\app.asar'
@@ -158,7 +158,7 @@ if ($sourceKind -ceq 'official-git-tag') {
 } else {
   throw "manifest has an unsupported dsh source: $($manifest.dshSource.kind)"
 }
-$expectedZipName = "DeepSeek-Harness-win64-v$($manifest.portableVersion).zip"
+$expectedZipName = "CedarDSH-Desktop-win64-v$($manifest.portableVersion).zip"
 if ((Split-Path -Leaf $ZipPath) -cne $expectedZipName) {
   throw "ZIP name does not match manifest portable version: expected $expectedZipName"
 }

@@ -123,7 +123,7 @@ function New-DshGitHubHeaders {
   return @{
     Accept = 'application/vnd.github+json'
     Authorization = "Bearer $env:GH_TOKEN"
-    'User-Agent' = 'deepseek-harness-portable-release-script'
+    'User-Agent' = 'cedardsh-desktop-release-script'
     'X-GitHub-Api-Version' = '2022-11-28'
   }
 }

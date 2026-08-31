@@ -13,7 +13,7 @@ const MAX_RESPONSE_BYTES = 1024 * 1024
 const RELEASE_PAGE_SIZE = 100
 const MAX_RELEASE_PAGES = 5
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
-const ASSET_PATTERN = /^DeepSeek-Harness-win64-v(.+)\.zip$/u
+const ASSET_PATTERN = /^(?:CedarDSH-Desktop|DeepSeek-Harness)-win64-v(.+)\.zip$/u
 
 /**
  * Parse a supported Semantic Version for deterministic comparison.
@@ -213,7 +213,7 @@ function requestReleasePage(page) {
     const request = https.get(`${RELEASES_URL}?per_page=${RELEASE_PAGE_SIZE}&page=${page}`, {
       headers: {
         Accept: 'application/vnd.github+json',
-        'User-Agent': 'deepseek-harness-portable-update-check',
+        'User-Agent': 'cedardsh-desktop-update-check',
         'X-GitHub-Api-Version': '2022-11-28',
       },
     }, (response) => {

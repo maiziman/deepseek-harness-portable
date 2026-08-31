@@ -444,7 +444,7 @@ jobs:
 
             This release contains DSH `${{ needs.detect.outputs.dsh_version }}` from `${{ needs.detect.outputs.source_tag }}` at the exact commit recorded above. The source is built with the upstream project's own release verification, official build, pack, and clean-install checks.
 
-            Download `${{ needs.detect.outputs.asset_name }}`, extract it, and double-click `DeepSeek-Harness.exe`. No Node.js, installer, or administrator access is required. Settings and sessions stay in the portable `dsh-home` folder, and the ZIP contains no optional plugins.
+            Download `${{ needs.detect.outputs.asset_name }}`, extract it, and double-click `CedarDSH-Desktop.exe`. No Node.js, installer, or administrator access is required. Settings and sessions stay in the portable `dsh-home` folder, and the ZIP contains no optional plugins.
 
             The ZIP passed clean builds and real UI boot probes on Windows Server 2022 and 2025. Verify it against `SHA256SUMS.txt`. Optional reasoning and image detection is available from [CedarDSH Model Probe](https://github.com/maiziman/cedardsh-model-probe).
         run: |

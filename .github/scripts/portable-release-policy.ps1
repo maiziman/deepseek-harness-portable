@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 $script:DshPortableSemverBody = '(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?'
 $script:DshPortableVersionPattern = '^' + $script:DshPortableSemverBody + '$'
 $script:DshPortableTagPattern = '^v(?<version>' + $script:DshPortableSemverBody + ')$'
-$script:DshPortableAssetPattern = '^DeepSeek-Harness-win64-v(?<version>' + $script:DshPortableSemverBody + ')\.zip$'
+$script:DshPortableAssetPattern = '^(?:CedarDSH-Desktop|DeepSeek-Harness)-win64-v(?<version>' + $script:DshPortableSemverBody + ')\.zip$'
 $script:DshPortableMarkerPattern = '(?m)^<!-- portable-version: (?<version>' + $script:DshPortableSemverBody + ') -->\r?$'
 $script:DshVersionMarkerPattern = '(?m)^<!-- dsh-version: (?<version>' + $script:DshPortableSemverBody + ') -->\r?$'
 $script:DshSourceTagMarkerPattern = '(?m)^<!-- upstream-source-tag: (?<value>dsh-v' + $script:DshPortableSemverBody + ') -->\r?$'
@@ -250,7 +250,7 @@ function Resolve-DshPortableReleasePolicy {
   $portableVersion = Get-DshNextPortableVersion -HighestVersion $highestVersion
   return [pscustomobject]@{
     AlreadyPackaged = $false
-    AssetName = "DeepSeek-Harness-win64-v$portableVersion.zip"
+    AssetName = "CedarDSH-Desktop-win64-v$portableVersion.zip"
     AssetState = $null
     PortableVersion = $portableVersion
     Prerelease = $false

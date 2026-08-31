@@ -28,7 +28,7 @@ This reference describes how the portable ZIP is assembled, verified, and publis
 | `-SkipSmoke` | Skip the in-package boot probe. |
 | `-ForceDownloadNode` | Download Node.js again and repeat the official checksum verification. |
 
-The build writes `dist\DeepSeek-Harness-win64-v<portable-version>.zip` and `dist\SHA256SUMS.txt`. The ZIP's `manifest.json` records `portableVersion` separately from the official `dshVersion`, plus the Node.js, pnpm, and Electron versions, the pnpm package hash, upstream source tag and commit when supplied, and SHA256 values for key inputs and binaries. A tagged Release, its ZIP, and `portableVersion` must use the same Semantic Version.
+The build writes `dist\CedarDSH-Desktop-win64-v<portable-version>.zip` and `dist\SHA256SUMS.txt`. The ZIP's `manifest.json` records `portableVersion` separately from the official `dshVersion`, plus the Node.js, pnpm, and Electron versions, the pnpm package hash, upstream source tag and commit when supplied, and SHA256 values for key inputs and binaries. A tagged Release, its ZIP, and `portableVersion` must use the same Semantic Version.
 
 The source-package form keeps the selected official checkout unchanged. Upstream's own `release:verify`, `build:official`, and `release:pack` commands produce the `dsh`, `vendor`, and `landlock` tarball families. `.github/scripts/stage-official-dsh-packages.ps1` writes a closed package directory containing those tarballs, `provenance.json`, and `SHA256SUMS.txt`; the portable build rejects a missing archive, duplicate package identity, unexpected family, version mismatch, source mismatch, size mismatch, or checksum mismatch.
 
@@ -75,7 +75,7 @@ The packaged desktop app reads only complete published Releases whose strict `v<
 
 ```powershell
 .\verify-package.ps1
-.\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v1.2.1.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.2
+.\verify-package.ps1 -ZipPath .\dist\CedarDSH-Desktop-win64-v1.2.2.zip -ExpectedPortableVersion 1.2.2 -ExpectedDshVersion 0.1.2-alpha.2
 ```
 
 The build rejects an icon master without transparent and opaque pixels, an ICO without exactly 16, 20, 24, 32, 40, 48, 64, 128, and 256 px RGBA PNG frames, or a packaged EXE whose PE icon group differs from any source frame. Before compression, the build performs the full binary-sensitive scan for the actual repository, build-owned scratch, runner workspace, and package-input paths. It intentionally does not reject a machine-wide user-home or temporary-directory prefix because a third-party native binary can legitimately retain that generic prefix from its own upstream build. The verification probe checks a single top-level directory, absence of pre-launch reparse points, an empty `dsh-home`, extraction completeness, third-party notices, manifest and Node.js/pnpm runtime versions, the canonical-lock and runtime-map hashes, PE product and filename metadata, absence of generated absolute-path annotations, package-manager state, and default plugins, a real server boot, URL discovery, clean shutdown, and first-run profile initialization. It captures both UI images and machine-readable startup evidence proving that the rendered component numerator and denominator came from package-owned links and match the manifest total.

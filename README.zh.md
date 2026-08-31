@@ -20,9 +20,9 @@
 
 ## 三步开始使用
 
-1. 从 [Releases](https://github.com/maiziman/cedardsh-desktop/releases/latest) 下载 `DeepSeek-Harness-win64-v<版本>.zip`。
+1. 从 [Releases](https://github.com/maiziman/cedardsh-desktop/releases/latest) 下载 `CedarDSH-Desktop-win64-v<版本>.zip`。
 2. 将整个 ZIP 解压到较短的路径，例如 `C:\Tools\CedarDSH`。
-3. 双击 `DeepSeek-Harness.exe`，添加模型提供方、选择工作区，然后开始会话。
+3. 双击 `CedarDSH-Desktop.exe`，添加模型提供方、选择工作区，然后开始会话。
 
 无需安装 Node.js，无需安装程序，也无需管理员权限。社区构建尚未进行代码签名，Windows SmartScreen 可能提示“无法识别的应用”；请先用 `SHA256SUMS.txt` 核对 ZIP，再选择**更多信息 → 仍要运行**。
 

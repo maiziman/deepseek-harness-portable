@@ -20,9 +20,9 @@
 
 ## Start in three steps
 
-1. Download `DeepSeek-Harness-win64-v<version>.zip` from [Releases](https://github.com/maiziman/cedardsh-desktop/releases/latest).
+1. Download `CedarDSH-Desktop-win64-v<version>.zip` from [Releases](https://github.com/maiziman/cedardsh-desktop/releases/latest).
 2. Extract the whole ZIP to a short path such as `C:\Tools\CedarDSH`.
-3. Double-click `DeepSeek-Harness.exe`, add your model provider, choose a workspace, and start a session.
+3. Double-click `CedarDSH-Desktop.exe`, add your model provider, choose a workspace, and start a session.
 
 No Node.js, installer, or administrator access is required. Windows SmartScreen may warn about an unrecognized app because the community build is not code-signed; compare the ZIP with `SHA256SUMS.txt` before choosing **More info → Run anyway**.
 

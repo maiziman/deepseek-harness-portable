@@ -28,7 +28,7 @@
 | `-SkipSmoke` | 跳过包内真实启动探测。 |
 | `-ForceDownloadNode` | 重新下载 Node.js，并再次执行官方校验。 |
 
-构建会写入 `dist\DeepSeek-Harness-win64-v<便携版本>.zip` 和 `dist\SHA256SUMS.txt`。ZIP 内的 `manifest.json` 会分别记录 `portableVersion` 与官方 `dshVersion`，以及 Node.js、pnpm、Electron 版本、pnpm 包哈希、提供来源时的上游源码标签与提交、关键输入和二进制文件的 SHA256。带标签发布时，Release 标签、ZIP 与 `portableVersion` 必须使用同一个语义版本。
+构建会写入 `dist\CedarDSH-Desktop-win64-v<便携版本>.zip` 和 `dist\SHA256SUMS.txt`。ZIP 内的 `manifest.json` 会分别记录 `portableVersion` 与官方 `dshVersion`，以及 Node.js、pnpm、Electron 版本、pnpm 包哈希、提供来源时的上游源码标签与提交、关键输入和二进制文件的 SHA256。带标签发布时，Release 标签、ZIP 与 `portableVersion` 必须使用同一个语义版本。
 
 源码包构建会保持选定的官方 checkout 不变。上游自己的 `release:verify`、`build:official` 与 `release:pack` 命令生成 `dsh`、`vendor` 和 `landlock` 三组压缩包；`.github/scripts/stage-official-dsh-packages.ps1` 随后写出一个封闭的包目录，其中包含这些压缩包、`provenance.json` 和 `SHA256SUMS.txt`。如果压缩包缺失、包名重复、分组异常、版本或源码不匹配、大小不符或校验失败，便携构建会终止。
 
@@ -75,7 +75,7 @@ build-portable.ps1
 
 ```powershell
 .\verify-package.ps1
-.\verify-package.ps1 -ZipPath .\dist\DeepSeek-Harness-win64-v1.2.1.zip -ExpectedPortableVersion 1.2.1 -ExpectedDshVersion 0.1.2-alpha.2
+.\verify-package.ps1 -ZipPath .\dist\CedarDSH-Desktop-win64-v1.2.2.zip -ExpectedPortableVersion 1.2.2 -ExpectedDshVersion 0.1.2-alpha.2
 ```
 
 如果图标母版不同时包含透明和不透明像素、ICO 不是由 16、20、24、32、40、48、64、128 和 256 px 共 9 档 RGBA PNG 组成，或最终 EXE 的 PE 图标组与任一源图帧不同，构建都会终止。压缩前，构建会对真实仓库、构建专用 scratch、runner 工作区与包输入路径执行完整的二进制敏感扫描。扫描不会把电脑级用户主目录或临时目录前缀本身判为泄漏，因为第三方原生二进制可能合法保留其上游构建使用的通用前缀。验证探针还会检查唯一顶层目录、启动前没有 reparse point、`dsh-home` 为空、解压完整性、第三方声明、manifest 与 Node.js/pnpm 版本、规范 lock 与运行图哈希、EXE 产品名和原文件名、生成文件中没有绝对路径注释、包管理器状态与默认插件缺失、真实服务启动、URL 发现、干净退出和首次 profile 初始化。它同时捕获界面截图与机器可读的启动证据，证明实际显示的组件分子和分母来自包内链接，并与 manifest 总数一致。
