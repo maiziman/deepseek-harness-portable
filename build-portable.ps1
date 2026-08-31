@@ -1,4 +1,4 @@
-# Build the DeepSeek Harness portable desktop package for Windows x64.
+# Build the CedarDSH Desktop portable package for Windows x64.
 #
 # Produces: dist\DeepSeek-Harness-win64-v<portable-version>.zip (+ SHA256SUMS.txt)
 #
@@ -444,7 +444,7 @@ $stagedIcon = Join-Path $stagingShell 'icon.ico'
 Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagedIcon -ErrorAction Stop
 
 Write-Output '=== electron-packager ==='
-$productName = 'DeepSeek Harness Pure Portable'
+$productName = 'CedarDSH Desktop'
 $packagerCli = @(
   (Join-Path $tools 'node_modules\@electron\packager\bin\electron-packager.mjs'),
   (Join-Path $tools 'node_modules\@electron\packager\bin\electron-packager.js'),
@@ -490,7 +490,7 @@ Copy-Item (Join-Path $psRoot 'THIRD_PARTY_NOTICES.md') (Join-Path $pkg 'THIRD_PA
 Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
 
 $manifest = [ordered]@{
-  name = 'DeepSeek Harness Pure Portable'
+  name = 'CedarDSH Desktop'
   platform = 'win32'; arch = 'x64'
   portableVersion = $PortableVersion
   dshVersion = $DshVersion

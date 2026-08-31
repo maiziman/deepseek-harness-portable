@@ -82,8 +82,8 @@ if (-not (Test-Path -LiteralPath $dshHome -PathType Container) -or @(Get-ChildIt
 $exe = Join-Path $pkgRoot 'DeepSeek-Harness.exe'
 if (-not (Test-Path $exe)) { throw "extraction incomplete: $exe missing" }
 $exeVersion = (Get-Item -LiteralPath $exe).VersionInfo
-if ([string]$exeVersion.ProductName -cne 'DeepSeek Harness Pure Portable' -or
-  [string]$exeVersion.FileDescription -cne 'DeepSeek Harness Pure Portable' -or
+if ([string]$exeVersion.ProductName -cne 'CedarDSH Desktop' -or
+  [string]$exeVersion.FileDescription -cne 'CedarDSH Desktop' -or
   [string]$exeVersion.OriginalFilename -cne 'DeepSeek-Harness.exe' -or
   [string]$exeVersion.InternalName -cne 'DeepSeek-Harness') {
   throw "EXE branding metadata is inconsistent: $($exeVersion | Select-Object ProductName, FileDescription, OriginalFilename, InternalName | ConvertTo-Json -Compress)"
@@ -115,7 +115,7 @@ if ($ExpectedPortableVersion -and [string]$manifest.portableVersion -cne $Expect
 if ($ExpectedDshVersion -and [string]$manifest.dshVersion -cne $ExpectedDshVersion) {
   throw "manifest dsh version does not match the requested build: $($manifest.dshVersion) != $ExpectedDshVersion"
 }
-if ([string]$manifest.name -cne 'DeepSeek Harness Pure Portable') { throw "unexpected package name: $($manifest.name)" }
+if ([string]$manifest.name -cne 'CedarDSH Desktop') { throw "unexpected package name: $($manifest.name)" }
 if ([string]$exeVersion.ProductVersion -cne [string]$manifest.portableVersion -or
   [string]$exeVersion.FileVersion -cne [string]$manifest.portableVersion) {
   throw "EXE version metadata does not match portable $($manifest.portableVersion)"

@@ -1,4 +1,4 @@
-# Building DeepSeek Harness Pure Portable
+# Building CedarDSH Desktop
 
 This reference describes how the portable ZIP is assembled, verified, and published. For installation and product use, start with the [project README](../README.md).
 
@@ -71,10 +71,6 @@ After both runners pass, the workflow enters the same publication lock used by m
 
 The packaged desktop app reads only complete published Releases whose strict `v<SemVer>` tag, ZIP version, and uploaded asset records agree. At most once every 24 hours it compares the highest valid portable version with `manifest.json`; packages created before `portableVersion` use their legacy `dshVersion` value. A newer version produces an opt-in download prompt, including desktop-shell fixes that keep the same dsh dependency. The app does not download or replace files. Set `DSH_UPDATE_CHECK=0` before launch to disable the network check.
 
-## Independent optional plugin release
-
-`DSH Custom API Capabilities` is an independent, opt-in Bundle with its own `plugin-model-capabilities-v<version>` tag and GitHub Release. The portable ZIP neither contains nor installs it. The `plugin-release` workflow requires the tag version to equal `plugins/dsh-model-capabilities/package.json`, runs the plugin tests, confirms the npm tarball contains exactly the seven published files, and generates a one-line `SHA256SUMS.txt`. It installs that tarball through the official CLI in a clean checkout of the exact upstream tag and commit recorded in `.github/plugin-compatibility.json`, expands the Web profile, and boots its command surface. A separate Windows gate builds and verifies a pure portable ZIP, extracts it into an empty directory with no global pnpm or Corepack cache, installs the exact plugin candidate from an empty pnpm store in offline mode, and confirms the expanded Web configuration. Only then does publication stage the `.tgz` and checksum under an isolated private Draft tag, verify the exact remote sizes and SHA256 digests, and assign the public plugin tag with GitHub's Latest flag disabled. Semantic Version prerelease labels are also projected to GitHub's prerelease state. Portable Releases retain their separate ZIP-and-checksum asset rule and version lifecycle.
-
 ## Verification
 
 ```powershell
@@ -84,7 +80,7 @@ The packaged desktop app reads only complete published Releases whose strict `v<
 
 The build rejects an icon master without transparent and opaque pixels, an ICO without exactly 16, 20, 24, 32, 40, 48, 64, 128, and 256 px RGBA PNG frames, or a packaged EXE whose PE icon group differs from any source frame. Before compression, the build performs the full binary-sensitive scan for the actual repository, build-owned scratch, runner workspace, and package-input paths. It intentionally does not reject a machine-wide user-home or temporary-directory prefix because a third-party native binary can legitimately retain that generic prefix from its own upstream build. The verification probe checks a single top-level directory, absence of pre-launch reparse points, an empty `dsh-home`, extraction completeness, third-party notices, manifest and Node.js/pnpm runtime versions, the canonical-lock and runtime-map hashes, PE product and filename metadata, absence of generated absolute-path annotations, package-manager state, and default plugins, a real server boot, URL discovery, clean shutdown, and first-run profile initialization. It captures both UI images and machine-readable startup evidence proving that the rendered component numerator and denominator came from package-owned links and match the manifest total.
 
-GitHub Actions repeats the build and probe on fresh Windows Server 2022 and 2025 runners. Branch pushes select the highest official `dsh-v*` tag once and upload short-lived workflow artifacts. The upstream watcher's optional manual version is only an assertion of that unique highest official tag; it cannot publish a historical dsh version into the forward update stream. A `v*` tag uses its own version as `portableVersion` and reads the exact dsh version committed in `.github/portable-dsh-version.txt`, then resolves that version to its official source tag and commit; update the file before creating a manual portable tag. Generated notes compare only with the preceding complete public portable Release whose tag is strict `v<SemVer>`, excluding failed tags plus legacy upstream and plugin tag families. Upstream tracking follows the same monotonic `v*` stream and publishes a verified next patch after an official tagged source passes the upstream build, package, and portable verification steps. A `plugin-model-capabilities-v*` tag runs only the independent plugin publication workflow.
+GitHub Actions repeats the build and probe on fresh Windows Server 2022 and 2025 runners. Branch pushes select the highest official `dsh-v*` tag once and upload short-lived workflow artifacts. The upstream watcher's optional manual version is only an assertion of that unique highest official tag; it cannot publish a historical dsh version into the forward update stream. A `v*` tag uses its own version as `portableVersion` and reads the exact dsh version committed in `.github/portable-dsh-version.txt`, then resolves that version to its official source tag and commit; update the file before creating a manual portable tag. Generated notes compare only with the preceding complete public portable Release whose tag is strict `v<SemVer>`, excluding failed and unrelated tag families. Upstream tracking follows the same monotonic `v*` stream and publishes a verified next patch after an official tagged source passes the upstream build, package, and portable verification steps.
 
 GitHub runners use Windows Server. Periodically spot-check a published ZIP on Windows 10 or 11, including SmartScreen behavior and common antivirus software.
 
@@ -95,7 +91,6 @@ GitHub runners use Windows Server. Periodically spot-check a published ZIP on Wi
 ├─ build-portable.ps1       build, assemble, smoke-test, and archive
 ├─ verify-package.ps1       deterministic compatibility probe
 ├─ watch-progress.ps1       concise progress output for long local builds
-├─ plugins/                 independently installable Bundles
 ├─ shell/                   Electron shell and application icon
 ├─ .github/workflows/       clean-machine matrix and tagged releases
 ├─ docs/                    README and social-preview assets

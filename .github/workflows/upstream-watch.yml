@@ -440,13 +440,13 @@ jobs:
             <!-- dsh-version: ${{ needs.detect.outputs.dsh_version }} -->
             <!-- upstream-source-tag: ${{ needs.detect.outputs.source_tag }} -->
             <!-- upstream-source-sha: ${{ needs.detect.outputs.source_sha }} -->
-            **Official tagged DeepSeek Harness source, built without code patches. Ready to run on Windows.**
+            **CedarDSH Desktop: download one ZIP, extract it, and run DeepSeek Harness on Windows.**
 
-            DeepSeek Harness Pure Portable `v${{ needs.detect.outputs.portable_version }}` contains DSH `${{ needs.detect.outputs.dsh_version }}` from `${{ needs.detect.outputs.source_tag }}` at the exact commit recorded above. The source is built with the upstream project's own release verification, official build, pack, and clean-install checks.
+            This release contains DSH `${{ needs.detect.outputs.dsh_version }}` from `${{ needs.detect.outputs.source_tag }}` at the exact commit recorded above. The source is built with the upstream project's own release verification, official build, pack, and clean-install checks.
 
-            Download `${{ needs.detect.outputs.asset_name }}`, extract it, and double-click `DeepSeek-Harness.exe`. No Node.js, installer, or administrator access is required. This community wrapper adds the Windows runtime, desktop window, portable data directory, and an opt-in update notice; it does not include or auto-install plugins. Packaging only normalizes non-executable generated comments that contain build-machine paths.
+            Download `${{ needs.detect.outputs.asset_name }}`, extract it, and double-click `DeepSeek-Harness.exe`. No Node.js, installer, or administrator access is required. Settings and sessions stay in the portable `dsh-home` folder, and the ZIP contains no optional plugins.
 
-            The ZIP passed clean builds and real UI boot probes on Windows Server 2022 and 2025. Verify it against `SHA256SUMS.txt`. The optional [DSH Custom API Capabilities plugin](https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.2) has its own Release and lifecycle.
+            The ZIP passed clean builds and real UI boot probes on Windows Server 2022 and 2025. Verify it against `SHA256SUMS.txt`. Optional reasoning and image detection is available from [CedarDSH Model Probe](https://github.com/maiziman/cedardsh-model-probe).
         run: |
           if ([bool]$env:PREVIOUS_TAG -ne [bool]$env:PREVIOUS_SHA) {
             throw 'previous portable tag and commit must be supplied together'
@@ -467,7 +467,7 @@ jobs:
             Tag = $env:RELEASE_TAG
             PackageName = $env:ASSET_NAME
             Prerelease = $env:PRERELEASE
-            ReleaseName = "DeepSeek Harness Pure Portable v$env:PORTABLE_VERSION · Windows x64 (DSH $env:DSH_VERSION)"
+            ReleaseName = "CedarDSH Desktop v$env:PORTABLE_VERSION · Windows Portable (DSH $env:DSH_VERSION)"
             Body = $env:RELEASE_BODY
             TargetCommitish = $env:TARGET_COMMIT
           }

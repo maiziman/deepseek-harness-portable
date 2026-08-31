@@ -20,7 +20,7 @@ function release(version, options = {}) {
     draft: options.draft === true,
     html_url: options.url || `https://github.com/maiziman/deepseek-harness-portable/releases/tag/v${version}`,
     tag_name: options.tag || `v${version}`,
-    name: options.name || `DeepSeek Harness Portable ${version}`,
+    name: options.name || `CedarDSH Desktop ${version}`,
     assets: [
       { name: `DeepSeek-Harness-win64-v${version}.zip`, state: 'uploaded', size: 1024, digest: `sha256:${'a'.repeat(64)}` },
       { name: 'SHA256SUMS.txt', state: 'uploaded', size: 96, digest: `sha256:${'b'.repeat(64)}` },
@@ -51,18 +51,18 @@ test('packaged portable version uses the new field and supports legacy manifests
 })
 
 test('release selection ignores drafts, foreign URLs, and malformed assets', () => {
-  const pluginRelease = {
+  const unrelatedRelease = {
     draft: false,
-    html_url: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-model-capabilities-v0.1.0',
-    tag_name: 'plugin-model-capabilities-v0.1.0',
-    name: 'DSH Model Capabilities Plugin v0.1.0',
+    html_url: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/tools-v0.1.0',
+    tag_name: 'tools-v0.1.0',
+    name: 'Auxiliary tool v0.1.0',
     assets: [
-      { name: 'maiziman-dsh-model-capabilities-0.1.0.tgz' },
+      { name: 'auxiliary-tool-0.1.0.tgz' },
       { name: 'SHA256SUMS.txt' },
     ],
   }
   const releases = [
-    pluginRelease,
+    unrelatedRelease,
     release('0.2.0-rc.1', { draft: true }),
     release('0.1.9', { url: 'https://example.com/releases/0.1.9' }),
     { ...release('0.1.8'), assets: [{ name: 'source.zip' }] },
@@ -73,11 +73,11 @@ test('release selection ignores drafts, foreign URLs, and malformed assets', () 
   assert.deepEqual(selectLatestRelease(releases), {
     version: '0.1.1-rc.3',
     releaseUrl: 'https://github.com/maiziman/deepseek-harness-portable/releases/tag/v0.1.1-rc.3',
-    releaseName: 'DeepSeek Harness Portable 0.1.1-rc.3',
+    releaseName: 'CedarDSH Desktop 0.1.1-rc.3',
   })
   assert.equal(isTrustedReleaseUrl('https://github.com/maiziman/deepseek-harness-portable/releases/tag/v1'), true)
   assert.equal(isTrustedReleaseUrl('https://github.com/another/repository/releases/tag/v1'), false)
-  assert.equal(selectLatestRelease([pluginRelease]), null)
+  assert.equal(selectLatestRelease([unrelatedRelease]), null)
 })
 
 test('an update is offered only for a newer public portable package', () => {
@@ -99,17 +99,17 @@ test('release selection requires matching tag and complete asset records', () =>
   assert.equal(selectLatestRelease([incomplete]), null)
 })
 
-test('release pagination reaches a portable package after a full plugin page', async () => {
-  const pluginPage = Array.from({ length: 100 }, (_, index) => ({
+test('release pagination reaches a portable package after a full unrelated page', async () => {
+  const unrelatedPage = Array.from({ length: 100 }, (_, index) => ({
     draft: false,
-    html_url: `https://github.com/maiziman/deepseek-harness-portable/releases/tag/plugin-${index}`,
-    name: `Plugin ${index}`,
-    assets: [{ name: `plugin-${index}.tgz` }, { name: 'SHA256SUMS.txt' }],
+    html_url: `https://github.com/maiziman/deepseek-harness-portable/releases/tag/tool-${index}`,
+    name: `Tool ${index}`,
+    assets: [{ name: `tool-${index}.tgz` }, { name: 'SHA256SUMS.txt' }],
   }))
   const requested = []
   const releases = await collectReleasePages(async (page) => {
     requested.push(page)
-    return page === 1 ? pluginPage : [release('0.2.0-alpha.1')]
+    return page === 1 ? unrelatedPage : [release('0.2.0-alpha.1')]
   })
   assert.deepEqual(requested, [1, 2])
   assert.equal(selectLatestRelease(releases).version, '0.2.0-alpha.1')

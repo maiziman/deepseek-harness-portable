@@ -352,11 +352,11 @@ jobs:
             <!-- dsh-version: ${{ needs.resolve-dsh-version.outputs.dsh_version }} -->
             <!-- upstream-source-tag: ${{ needs.resolve-dsh-version.outputs.source_tag }} -->
             <!-- upstream-source-sha: ${{ needs.resolve-dsh-version.outputs.source_sha }} -->
-            **Official tagged DeepSeek Harness source, built without code patches. Ready to run on Windows.**
+            **CedarDSH Desktop: download one ZIP, extract it, and run DeepSeek Harness on Windows.**
 
-            DeepSeek Harness Pure Portable `v${{ needs.resolve-dsh-version.outputs.portable_version }}` contains DSH `${{ needs.resolve-dsh-version.outputs.dsh_version }}` from `${{ needs.resolve-dsh-version.outputs.source_tag }}`. Download the ZIP, extract it, and double-click `DeepSeek-Harness.exe`; no Node.js, installer, or administrator access is required.
+            This release contains DSH `${{ needs.resolve-dsh-version.outputs.dsh_version }}` from `${{ needs.resolve-dsh-version.outputs.source_tag }}`. Download the ZIP, extract it, and double-click `DeepSeek-Harness.exe`. No Node.js, installer, or administrator access is required.
 
-            This community wrapper adds the Windows runtime, desktop window, portable data directory, and an opt-in update notice. It includes no plugins. Packaging only normalizes non-executable generated comments that contain build-machine paths. The exact attached ZIP passed real UI boot probes on Windows Server 2022 and 2025; verify it against `SHA256SUMS.txt`.
+            Settings and sessions stay in the portable `dsh-home` folder. The ZIP contains no optional plugins. It passed real UI boot checks on Windows Server 2022 and 2025; verify it against `SHA256SUMS.txt`.
         run: |
           if ([bool]$env:PREVIOUS_TAG -ne [bool]$env:PREVIOUS_SHA) {
             throw 'previous portable tag and commit must be supplied together'
@@ -378,7 +378,7 @@ jobs:
             PackageName = $env:ZIP_NAME
             TargetCommitish = $env:TARGET_COMMIT
             Prerelease = $env:PRERELEASE
-            ReleaseName = "DeepSeek Harness Pure Portable v$env:PORTABLE_VERSION · Windows x64 (DSH $env:DSH_VERSION)"
+            ReleaseName = "CedarDSH Desktop v$env:PORTABLE_VERSION · Windows Portable (DSH $env:DSH_VERSION)"
             Body = $env:RELEASE_BODY
           }
           if ($env:PREVIOUS_TAG) {

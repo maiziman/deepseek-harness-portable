@@ -1,10 +1,10 @@
 {
   "name": "dsh-desktop-shell",
-  "productName": "DeepSeek Harness Pure Portable",
+  "productName": "CedarDSH Desktop",
   "version": "1.0.0",
-  "description": "Clean Windows desktop shell for official tagged DeepSeek Harness source built without code patches",
+  "description": "Portable DeepSeek Harness desktop app for Windows",
   "main": "main.js",
-  "author": "DeepSeek Harness Pure Portable community packager",
+  "author": "CedarDSH Desktop contributors",
   "license": "MIT",
   "private": true
 }

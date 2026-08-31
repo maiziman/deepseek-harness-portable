@@ -22,7 +22,7 @@ Schema 4 来源记录会保存这套内部包集合、规范运行 package 与 s
 
 最终 manifest 会记录官方来源仓库、标签、commit、包管理器版本、完整包与运行包数量、外部 snapshot 数量、来源记录哈希、官方源码 lock 哈希、规范 consumer lock 哈希和运行模型哈希。包验证会要求 ZIP 只有一个顶层目录、启动前不存在 reparse point、`dsh-home` 为空、没有默认插件或包管理器状态，并通过内置 Node.js 驱动已安装 CLI，要求 `--version` 与所选 dsh 版本完全一致。公开前还会重新确认官方标签没有移动、自动运行的目标仍是最高标签，并且便携版本分配没有变化。这个源码选择与 [精确 ID Release 公开决策](2026-08-30-exact-id-release-publication.zh.md) 配合；后者继续负责 Draft 隔离、附件身份和从私有到公开的转换。
 
-默认产品是 DeepSeek Harness 纯净便携桌面版。它不对官方标签 Harness 源码打代码补丁，并增加固定版本的 Windows Node.js、pnpm 与 Electron 组件、桌面生命周期、便携数据目录和明确的更新提示；默认不包含、也不会自动安装任何能力插件。DSH 自定义 API 能力识别插件继续作为独立版本的可选 Bundle。
+默认产品是 CedarDSH Desktop。它不对官方标签 Harness 源码打代码补丁，并增加固定版本的 Windows Node.js、pnpm 与 Electron 组件、桌面生命周期、便携数据目录和明确的更新提示；默认不包含、也不会自动安装任何能力插件。CedarDSH Model Probe 由独立仓库维护和发布。
 
 ## 考虑过的替代方案
 

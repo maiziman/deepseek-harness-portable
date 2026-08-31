@@ -1,4 +1,4 @@
-// DeepSeek Harness portable desktop shell.
+// CedarDSH Desktop shell for packaged DeepSeek Harness.
 //
 // Spawns the bundled dsh server (runtime\node.exe running the installed
 // @deepseek-ai/dsh lib/bin.js with `web --no-open --port 0`) and shows the Web
@@ -266,7 +266,7 @@ async function maybePromptForUpdate() {
   const options = isChinese
     ? {
         type: 'info',
-        title: 'DeepSeek Harness 纯净便携桌面版更新',
+        title: 'CedarDSH Desktop 更新',
         message: `发现新版本 ${update.version}`,
         detail: `当前便携版本：${currentPortableVersion}\n新便携版本：${update.version}\n\n下载前请在 GitHub Release 中核对 SHA256。更新便携版时请保留 dsh-home 和 workspace。`,
         buttons: ['打开下载页面', '稍后提醒'],
@@ -275,7 +275,7 @@ async function maybePromptForUpdate() {
       }
     : {
         type: 'info',
-        title: 'DeepSeek Harness Pure Portable update',
+        title: 'CedarDSH Desktop update',
         message: `Version ${update.version} is available`,
         detail: `Current portable version: ${currentPortableVersion}\nNew portable version: ${update.version}\n\nVerify the SHA256 in the GitHub Release before updating. Preserve dsh-home and workspace when replacing the portable package.`,
         buttons: ['Open download page', 'Remind me later'],
@@ -317,7 +317,7 @@ function shutdown(code) {
 }
 
 function fatal(message) {
-  try { dialog.showErrorBox('DeepSeek Harness Pure Portable', message) } catch { /* no window yet */ }
+  try { dialog.showErrorBox('CedarDSH Desktop', message) } catch { /* no window yet */ }
   console.error(`dsh-shell: ${message}`)
   shutdown(1)
 }
@@ -405,7 +405,7 @@ async function createWindow() {
     autoHideMenuBar: true,
     backgroundColor: '#101320',
     icon: fs.existsSync(APP_ICON) ? APP_ICON : undefined,
-    title: 'DeepSeek Harness Pure Portable',
+    title: 'CedarDSH Desktop',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

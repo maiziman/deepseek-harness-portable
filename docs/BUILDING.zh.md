@@ -1,4 +1,4 @@
-# 构建 DeepSeek Harness 纯净便携桌面版
+# 构建 CedarDSH Desktop
 
 本文档说明便携 ZIP 的组装、验证和发布方式。安装与日常使用请从 [项目 README](../README.zh.md) 开始。
 
@@ -71,10 +71,6 @@ build-portable.ps1
 
 便携程序只读取严格 `v<语义版本>` 标签、ZIP 版本和附件上传记录相互一致的完整公开 Release。它每 24 小时最多检查一次，把最高的有效便携版本与 `manifest.json` 比较；尚无 `portableVersion` 字段的旧包会回退使用原有 `dshVersion`。因此，即使 dsh 依赖不变，桌面壳修复也能触发新版提示。程序只会询问是否打开下载页，不会自动下载或替换文件。如需禁用联网检查，可在启动前设置 `DSH_UPDATE_CHECK=0`。
 
-## 独立可选插件发布
-
-`DSH 自定义 API 能力识别插件` 是独立可选 Bundle，使用自己的 `plugin-model-capabilities-v<版本>` 标签和 GitHub Release；便携 ZIP 不包含、也不会安装它。`plugin-release` 工作流要求标签版本与 `plugins/dsh-model-capabilities/package.json` 完全一致，运行插件测试，确认 npm 压缩包只包含 7 个发布文件，并生成单行 `SHA256SUMS.txt`。随后，它会在 `.github/plugin-compatibility.json` 固定的精确上游标签和提交中，通过官方 CLI 把该压缩包安装到全新环境，展开 Web profile 并验证命令可以启动。独立 Windows 门槛还会构建并验证纯净便携 ZIP，把它解压到没有全局 pnpm 和 Corepack 缓存的空目录，再从空 pnpm store 以离线模式安装精确插件候选，并核对展开后的 Web 配置。全部检查通过后，工作流才在使用隔离临时标签的私有 Draft 中暂存 `.tgz` 和校验和，核对远端文件的精确大小与 SHA256 摘要，再指定公开插件标签，同时关闭 GitHub Latest 标记；语义版本中的预览标识也会同步到 GitHub prerelease 状态。便携版 Release 继续遵守独立的 ZIP 加校验和附件规则与版本周期。
-
 ## 验证
 
 ```powershell
@@ -84,7 +80,7 @@ build-portable.ps1
 
 如果图标母版不同时包含透明和不透明像素、ICO 不是由 16、20、24、32、40、48、64、128 和 256 px 共 9 档 RGBA PNG 组成，或最终 EXE 的 PE 图标组与任一源图帧不同，构建都会终止。压缩前，构建会对真实仓库、构建专用 scratch、runner 工作区与包输入路径执行完整的二进制敏感扫描。扫描不会把电脑级用户主目录或临时目录前缀本身判为泄漏，因为第三方原生二进制可能合法保留其上游构建使用的通用前缀。验证探针还会检查唯一顶层目录、启动前没有 reparse point、`dsh-home` 为空、解压完整性、第三方声明、manifest 与 Node.js/pnpm 版本、规范 lock 与运行图哈希、EXE 产品名和原文件名、生成文件中没有绝对路径注释、包管理器状态与默认插件缺失、真实服务启动、URL 发现、干净退出和首次 profile 初始化。它同时捕获界面截图与机器可读的启动证据，证明实际显示的组件分子和分母来自包内链接，并与 manifest 总数一致。
 
-GitHub Actions 会在全新的 Windows Server 2022 和 2025 runner 上重复构建与验证。分支推送会在一次运行中选择最高的官方 `dsh-v*` 标签，并上传短期工作流产物。上游跟踪器的可选手动版本只用于断言当前唯一最高的官方标签，不能把历史 dsh 版本发布到继续向前的更新流。`v*` 标签会把自身版本作为 `portableVersion`，读取提交中的 `.github/portable-dsh-version.txt` 精确 dsh 版本，再把该版本解析为官方来源标签和 commit；创建人工便携版标签前需要先更新这个文件。自动发布说明只与前一个使用严格 `v<语义版本>` 标签且附件完整的公开便携版比较，不会选中发布失败的标签，也不会混入旧上游或插件标签系列。上游跟踪流程沿用同一条递增的 `v*` 版本流，在官方标签源码通过上游构建、打包和便携版验证后发布下一个补丁版本。`plugin-model-capabilities-v*` 标签只运行独立插件发布流程。
+GitHub Actions 会在全新的 Windows Server 2022 和 2025 runner 上重复构建与验证。分支推送会在一次运行中选择最高的官方 `dsh-v*` 标签，并上传短期工作流产物。上游跟踪器的可选手动版本只用于断言当前唯一最高的官方标签，不能把历史 dsh 版本发布到继续向前的更新流。`v*` 标签会把自身版本作为 `portableVersion`，读取提交中的 `.github/portable-dsh-version.txt` 精确 dsh 版本，再把该版本解析为官方来源标签和 commit；创建人工便携版标签前需要先更新这个文件。自动发布说明只与前一个使用严格 `v<语义版本>` 标签且附件完整的公开便携版比较，不会选中发布失败或无关的标签系列。上游跟踪流程沿用同一条递增的 `v*` 版本流，在官方标签源码通过上游构建、打包和便携版验证后发布下一个补丁版本。
 
 GitHub runner 使用 Windows Server。应定期在 Windows 10 或 11 上抽查已发布的 ZIP，包括 SmartScreen 和常见杀毒软件的表现。
 
@@ -95,7 +91,6 @@ GitHub runner 使用 Windows Server。应定期在 Windows 10 或 11 上抽查�
 ├─ build-portable.ps1       构建、组装、冒烟与压缩
 ├─ verify-package.ps1       确定性的兼容性探针
 ├─ watch-progress.ps1       本地长时间构建的简洁进度输出
-├─ plugins/                 可独立安装的 Bundle
 ├─ shell/                   Electron 桌面壳与应用图标
 ├─ .github/workflows/       全新系统矩阵与标签发布
 ├─ docs/                    README 与社交分享图片
