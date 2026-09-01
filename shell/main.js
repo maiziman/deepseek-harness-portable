@@ -828,24 +828,30 @@ async function serveServerUrl(url) {
               if (!(button instanceof HTMLElement)) return null
               const actionContainer = button.parentElement?.parentElement?.parentElement
               const settingsArea = actionContainer?.nextElementSibling
-              if (!(settingsArea instanceof HTMLElement)) return { present: true, aligned: false }
+              if (!(settingsArea instanceof HTMLElement)) return { present: true, adjacent: false }
               const buttonRect = button.getBoundingClientRect()
               const settingsRect = settingsArea.getBoundingClientRect()
               const centerY = buttonRect.top + buttonRect.height / 2
+              const rail = button.parentElement?.classList.contains('cedardshUpdateRail') === true
               return {
                 present: true,
-                aligned: buttonRect.left >= settingsRect.left + settingsRect.width / 2
-                  && buttonRect.right <= settingsRect.right
-                  && buttonRect.right >= settingsRect.right - 24
-                  && centerY >= settingsRect.top
-                  && centerY <= settingsRect.bottom,
+                adjacent: rail
+                  ? buttonRect.left === settingsRect.left
+                    && buttonRect.width === settingsRect.width
+                    && buttonRect.bottom === settingsRect.top
+                  : buttonRect.left >= settingsRect.left + settingsRect.width / 2
+                    && buttonRect.right <= settingsRect.right
+                    && buttonRect.right >= settingsRect.right - 24
+                    && centerY >= settingsRect.top
+                    && centerY <= settingsRect.bottom,
+                mode: rail ? 'rail' : 'wide',
                 button: { x: buttonRect.x, y: buttonRect.y, width: buttonRect.width, height: buttonRect.height },
                 settings: { x: settingsRect.x, y: settingsRect.y, width: settingsRect.width, height: settingsRect.height },
               }
             })()`, true)
             if (updateButtonLayout === null) throw new Error('CedarDSH update button was not registered')
-            if (!updateButtonLayout.aligned) {
-              throw new Error(`CedarDSH update button is not aligned beside Settings: ${JSON.stringify(updateButtonLayout)}`)
+            if (!updateButtonLayout.adjacent) {
+              throw new Error(`CedarDSH update button is not adjacent to Settings: ${JSON.stringify(updateButtonLayout)}`)
             }
             await targetWindow.webContents.executeJavaScript(`(async () => {
               const dismiss = async labels => {
