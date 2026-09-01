@@ -2,10 +2,11 @@
 
 const path = require('node:path')
 
-/** Build the normal Web-profile server invocation. */
-function dshServerArgs(dshBin) {
+/** Build the Web-profile invocation with the CedarDSH-only launcher layer. */
+function dshServerArgs(dshBin, patchPath) {
   if (typeof dshBin !== 'string' || dshBin.length === 0) throw new TypeError('dshBin must be a non-empty string')
-  return [dshBin, 'web', '--no-open', '--port', '0']
+  if (typeof patchPath !== 'string' || patchPath.length === 0) throw new TypeError('patchPath must be a non-empty string')
+  return [dshBin, 'web', '--patch', patchPath, '--no-open', '--port', '0']
 }
 
 /** Build the child environment while keeping plugin package-manager data in DSH_HOME. */

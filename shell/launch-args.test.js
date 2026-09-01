@@ -6,10 +6,12 @@ const path = require('node:path')
 const { dshServerArgs, portableDshEnv } = require('./launch-args.js')
 
 describe('dsh server arguments', () => {
-  it('boots the unmodified Web profile', () => {
-    assert.deepEqual(dshServerArgs('C:\\app\\dsh.js'), [
+  it('adds the CedarDSH launcher patch before Web application flags', () => {
+    assert.deepEqual(dshServerArgs('C:\\app\\dsh.js', 'C:\\shell\\cedardsh.patch.yml'), [
       'C:\\app\\dsh.js',
       'web',
+      '--patch',
+      'C:\\shell\\cedardsh.patch.yml',
       '--no-open',
       '--port',
       '0',

@@ -1,0 +1,5 @@
+# CedarDSH Desktop-only browser additions. This launcher layer is composed
+# after the official Web profile and never modifies the user's profile files.
+- insert:
+    - id: cedardsh-desktop-update
+      name: '@cedardsh/desktop-update'

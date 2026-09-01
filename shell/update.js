@@ -13,7 +13,7 @@ const MAX_RESPONSE_BYTES = 1024 * 1024
 const RELEASE_PAGE_SIZE = 100
 const MAX_RELEASE_PAGES = 5
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/u
-const ASSET_PATTERN = /^(?:CedarDSH-Desktop|DeepSeek-Harness)-win64-v(.+)\.zip$/u
+const ASSET_PATTERN = /^CedarDSH-Desktop-win64-v(.+)\.zip$/u
 
 /**
  * Parse a supported Semantic Version for deterministic comparison.
@@ -95,20 +95,12 @@ function isNewerVersion(candidate, current) {
 /**
  * Resolve the portable release version recorded by a packaged manifest.
  *
- * Packages created before portableVersion was introduced used dshVersion as
- * both the application release version and the upstream dependency version.
- * A present but malformed portableVersion is rejected instead of hidden by
- * that legacy fallback.
- *
  * @param {unknown} manifest Packaged manifest data.
  * @returns {string | null} Valid portable version or null.
  */
 function packagedPortableVersion(manifest) {
   if (manifest === null || typeof manifest !== 'object' || Array.isArray(manifest)) return null
-  if (Object.prototype.hasOwnProperty.call(manifest, 'portableVersion')) {
-    return parseVersion(manifest.portableVersion) === null ? null : manifest.portableVersion
-  }
-  return parseVersion(manifest.dshVersion) === null ? null : manifest.dshVersion
+  return parseVersion(manifest.portableVersion) === null ? null : manifest.portableVersion
 }
 
 /**
@@ -128,10 +120,30 @@ function isTrustedReleaseUrl(value) {
 }
 
 /**
+ * Validate the browser-download URL for one versioned portable ZIP.
+ *
+ * @param {unknown} value Candidate URL.
+ * @param {string} version Portable release version.
+ * @param {string} assetName ZIP asset name.
+ * @returns {boolean} Whether the URL is the expected GitHub asset endpoint.
+ */
+function isTrustedAssetUrl(value, version, assetName) {
+  if (typeof value !== 'string') return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:'
+      && url.hostname === 'github.com'
+      && url.pathname === `${RELEASE_PATH_PREFIX}download/v${version}/${assetName}`
+  } catch {
+    return false
+  }
+}
+
+/**
  * Read the portable version represented by a public GitHub Release.
  *
  * @param {unknown} release GitHub Release response entry.
- * @returns {{version: string, releaseUrl: string, releaseName: string} | null} Valid update metadata.
+ * @returns {{version: string, releaseUrl: string, releaseName: string, asset: {name: string, downloadUrl: string, size: number, sha256: string}} | null} Valid update metadata.
  */
 function releaseMetadata(release) {
   if (release === null || typeof release !== 'object' || release.draft === true) return null
@@ -152,10 +164,17 @@ function releaseMetadata(release) {
     if (asset.state !== 'uploaded' || !Number.isSafeInteger(asset.size) || asset.size <= 0) return null
     if (typeof asset.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(asset.digest)) return null
   }
+  if (!isTrustedAssetUrl(portableAssets[0].browser_download_url, match[1], portableAssets[0].name)) return null
   return {
     version: match[1],
     releaseUrl: release.html_url,
     releaseName: typeof release.name === 'string' && release.name.trim() !== '' ? release.name.trim() : match[1],
+    asset: {
+      name: portableAssets[0].name,
+      downloadUrl: portableAssets[0].browser_download_url,
+      size: portableAssets[0].size,
+      sha256: portableAssets[0].digest.slice('sha256:'.length),
+    },
   }
 }
 
@@ -163,7 +182,7 @@ function releaseMetadata(release) {
  * Select the highest published portable version from GitHub Releases.
  *
  * @param {unknown} releases GitHub Releases response.
- * @returns {{version: string, releaseUrl: string, releaseName: string} | null} Highest valid release.
+ * @returns {{version: string, releaseUrl: string, releaseName: string, asset: {name: string, downloadUrl: string, size: number, sha256: string}} | null} Highest valid release.
  */
 function selectLatestRelease(releases) {
   if (!Array.isArray(releases)) return null
@@ -181,7 +200,7 @@ function selectLatestRelease(releases) {
  *
  * @param {string} currentVersion Packaged portable version.
  * @param {unknown} releases GitHub Releases response.
- * @returns {{version: string, releaseUrl: string, releaseName: string} | null} Available update.
+ * @returns {{version: string, releaseUrl: string, releaseName: string, asset: {name: string, downloadUrl: string, size: number, sha256: string}} | null} Available update.
  */
 function availableUpdate(currentVersion, releases) {
   const latest = selectLatestRelease(releases)
@@ -278,6 +297,7 @@ module.exports = {
   collectReleasePages,
   fetchPublicReleases,
   isNewerVersion,
+  isTrustedAssetUrl,
   isTrustedReleaseUrl,
   packagedPortableVersion,
   parseVersion,

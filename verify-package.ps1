@@ -79,6 +79,10 @@ $dshHome = Join-Path $pkgRoot 'dsh-home'
 if (-not (Test-Path -LiteralPath $dshHome -PathType Container) -or @(Get-ChildItem -LiteralPath $dshHome -Force).Count -ne 0) {
   throw 'packaged dsh-home must exist and be completely empty before first launch'
 }
+$workspace = Join-Path $pkgRoot 'workspace'
+if (-not (Test-Path -LiteralPath $workspace -PathType Container) -or @(Get-ChildItem -LiteralPath $workspace -Force).Count -ne 0) {
+  throw 'packaged workspace must exist and be completely empty before first launch'
+}
 $exe = Join-Path $pkgRoot 'CedarDSH-Desktop.exe'
 if (-not (Test-Path $exe)) { throw "extraction incomplete: $exe missing" }
 $exeVersion = (Get-Item -LiteralPath $exe).VersionInfo
@@ -89,15 +93,19 @@ if ([string]$exeVersion.ProductName -cne 'CedarDSH Desktop' -or
   throw "EXE branding metadata is inconsistent: $($exeVersion | Select-Object ProductName, FileDescription, OriginalFilename, InternalName | ConvertTo-Json -Compress)"
 }
 $shellArchive = Join-Path $pkgRoot 'resources\app.asar'
-$unpackedUpdateModule = Join-Path $pkgRoot 'resources\app\update.js'
-if (-not (Test-Path $shellArchive) -and -not (Test-Path $unpackedUpdateModule)) {
-  throw 'extraction incomplete: packaged desktop shell missing'
+if (Test-Path -LiteralPath $shellArchive) {
+  throw 'packaged desktop shell must remain unpacked for in-place updates'
 }
-if (Test-Path $unpackedUpdateModule -PathType Leaf) {
-  foreach ($shellFile in @('main.js', 'startup-progress.js', 'launch-args.js', 'process-lifecycle.js', 'update.js', 'deepseek-mark.svg')) {
-    if (-not (Test-Path (Join-Path $pkgRoot "resources\app\$shellFile") -PathType Leaf)) {
-      throw "extraction incomplete: packaged desktop shell file missing: $shellFile"
-    }
+$shellRoot = Join-Path $pkgRoot 'resources\app'
+if (-not (Test-Path -LiteralPath $shellRoot -PathType Container)) {
+  throw 'extraction incomplete: unpacked desktop shell missing'
+}
+foreach ($shellFile in @(
+  'package.json', 'main.js', 'startup-progress.js', 'launch-args.js', 'process-lifecycle.js', 'diagnostics.js',
+  'update.js', 'update-install.js', 'update-helper.ps1', 'cedardsh.patch.yml', 'deepseek-mark.svg', 'icon.ico'
+)) {
+  if (-not (Test-Path -LiteralPath (Join-Path $shellRoot $shellFile) -PathType Leaf)) {
+    throw "extraction incomplete: packaged desktop shell file missing: $shellFile"
   }
 }
 Write-Output ('[1/4] extraction OK: {0} files' -f (Get-ChildItem $pkgRoot -Recurse -File).Count)
@@ -116,6 +124,25 @@ if ($ExpectedDshVersion -and [string]$manifest.dshVersion -cne $ExpectedDshVersi
   throw "manifest dsh version does not match the requested build: $($manifest.dshVersion) != $ExpectedDshVersion"
 }
 if ([string]$manifest.name -cne 'CedarDSH Desktop') { throw "unexpected package name: $($manifest.name)" }
+$ownedTopLevelEntries = @($manifest.ownedTopLevelEntries | ForEach-Object { [string]$_ })
+if ($ownedTopLevelEntries.Count -eq 0 -or $ownedTopLevelEntries.Count -ne @($ownedTopLevelEntries | Sort-Object -Unique).Count) {
+  throw 'manifest has no valid ownedTopLevelEntries list'
+}
+foreach ($entry in $ownedTopLevelEntries) {
+  if ([string]::IsNullOrWhiteSpace($entry) -or [IO.Path]::GetFileName($entry) -cne $entry -or
+    $entry -in @('.', '..', 'dsh-home', 'workspace', '.cedardsh-update')) {
+    throw "manifest owns invalid or preserved top-level entry: $entry"
+  }
+}
+$actualOwnedEntries = @(
+  Get-ChildItem -LiteralPath $pkgRoot -Force |
+    Where-Object { $_.Name -notin @('dsh-home', 'workspace') } |
+    ForEach-Object Name |
+    Sort-Object
+)
+if (Compare-Object @($ownedTopLevelEntries | Sort-Object) $actualOwnedEntries) {
+  throw 'manifest ownedTopLevelEntries do not match the extracted program files'
+}
 if ([string]$exeVersion.ProductVersion -cne [string]$manifest.portableVersion -or
   [string]$exeVersion.FileVersion -cne [string]$manifest.portableVersion) {
   throw "EXE version metadata does not match portable $($manifest.portableVersion)"
@@ -175,6 +202,12 @@ if ($manifest.updateFeed -ne 'https://github.com/maiziman/cedardsh-desktop/relea
 if ($manifest.startupProfileLinkCount -le 0) { throw 'manifest has no startup profile component total' }
 $modelCapabilitiesRoot = Join-Path $pkgRoot 'app\node_modules\@maiziman\dsh-model-capabilities'
 if (Test-Path -LiteralPath $modelCapabilitiesRoot) { throw 'pure portable package unexpectedly contains the optional capability plugin' }
+$desktopUpdateRoot = Join-Path $pkgRoot 'app\node_modules\@cedardsh\desktop-update'
+foreach ($pluginFile in @('package.json', 'lib\index.js', 'lib\client.js')) {
+  if (-not (Test-Path -LiteralPath (Join-Path $desktopUpdateRoot $pluginFile) -PathType Leaf)) {
+    throw "CedarDSH desktop update package file is missing: $pluginFile"
+  }
+}
 $packageManagerState = @(
   (Join-Path $pkgRoot 'app\package.json'),
   (Join-Path $pkgRoot 'app\pnpm-lock.yaml'),
@@ -274,6 +307,7 @@ if ($log -notmatch 'dsh web: http://') { throw 'server never announced its URL' 
 if (-not (Test-Path (Join-Path $pkgRoot 'dsh-home\profiles\web'))) { throw 'web profile was not initialized' }
 $profileModules = Join-Path $pkgRoot 'dsh-home\profiles\node_modules'
 if (-not (Test-Path (Join-Path $profileModules '@deepseek-ai\dsh'))) { throw 'installation fallback not prepared' }
+if (-not (Test-Path (Join-Path $profileModules '@cedardsh\desktop-update'))) { throw 'desktop update client link not prepared' }
 $actualProfileLinks = Get-ProfileLinkCount $profileModules (Join-Path $pkgRoot 'app\node_modules')
 if ($actualProfileLinks -ne $manifest.startupProfileLinkCount) {
   throw "startup component total mismatch: $actualProfileLinks != $($manifest.startupProfileLinkCount)"

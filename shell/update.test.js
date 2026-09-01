@@ -8,6 +8,7 @@ const {
   availableUpdate,
   collectReleasePages,
   isNewerVersion,
+  isTrustedAssetUrl,
   isTrustedReleaseUrl,
   packagedPortableVersion,
   parseVersion,
@@ -23,8 +24,20 @@ function release(version, options = {}) {
     tag_name: options.tag || `v${version}`,
     name: options.name || `CedarDSH Desktop ${version}`,
     assets: [
-      { name: `${assetPrefix}-win64-v${version}.zip`, state: 'uploaded', size: 1024, digest: `sha256:${'a'.repeat(64)}` },
-      { name: 'SHA256SUMS.txt', state: 'uploaded', size: 96, digest: `sha256:${'b'.repeat(64)}` },
+      {
+        name: `${assetPrefix}-win64-v${version}.zip`,
+        state: 'uploaded',
+        size: 1024,
+        digest: `sha256:${'a'.repeat(64)}`,
+        browser_download_url: `https://github.com/maiziman/cedardsh-desktop/releases/download/v${version}/${assetPrefix}-win64-v${version}.zip`,
+      },
+      {
+        name: 'SHA256SUMS.txt',
+        state: 'uploaded',
+        size: 96,
+        digest: `sha256:${'b'.repeat(64)}`,
+        browser_download_url: `https://github.com/maiziman/cedardsh-desktop/releases/download/v${version}/SHA256SUMS.txt`,
+      },
     ],
   }
 }
@@ -44,9 +57,9 @@ test('version parsing and ordering follow Semantic Version precedence', () => {
   assert.equal(isNewerVersion('1.0.0+build.2', '1.0.0+build.1'), false)
 })
 
-test('packaged portable version uses the new field and supports legacy manifests', () => {
+test('packaged portable version requires the current manifest field', () => {
   assert.equal(packagedPortableVersion({ portableVersion: '1.2.1', dshVersion: '0.1.2-alpha.1' }), '1.2.1')
-  assert.equal(packagedPortableVersion({ dshVersion: '0.1.1-rc.2' }), '0.1.1-rc.2')
+  assert.equal(packagedPortableVersion({ dshVersion: '0.1.1-rc.2' }), null)
   assert.equal(packagedPortableVersion({ portableVersion: 'invalid', dshVersion: '0.1.1-rc.2' }), null)
   assert.equal(packagedPortableVersion(null), null)
 })
@@ -75,16 +88,32 @@ test('release selection ignores drafts, foreign URLs, and malformed assets', () 
     version: '0.1.1-rc.3',
     releaseUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/tag/v0.1.1-rc.3',
     releaseName: 'CedarDSH Desktop 0.1.1-rc.3',
+    asset: {
+      name: 'CedarDSH-Desktop-win64-v0.1.1-rc.3.zip',
+      downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v0.1.1-rc.3/CedarDSH-Desktop-win64-v0.1.1-rc.3.zip',
+      size: 1024,
+      sha256: 'a'.repeat(64),
+    },
   })
   assert.equal(isTrustedReleaseUrl('https://github.com/maiziman/cedardsh-desktop/releases/tag/v1'), true)
   assert.equal(isTrustedReleaseUrl('https://github.com/another/repository/releases/tag/v1'), false)
+  assert.equal(isTrustedAssetUrl(
+    'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.2.3/CedarDSH-Desktop-win64-v1.2.3.zip',
+    '1.2.3',
+    'CedarDSH-Desktop-win64-v1.2.3.zip',
+  ), true)
+  assert.equal(isTrustedAssetUrl(
+    'https://example.com/maiziman/cedardsh-desktop/releases/download/v1.2.3/CedarDSH-Desktop-win64-v1.2.3.zip',
+    '1.2.3',
+    'CedarDSH-Desktop-win64-v1.2.3.zip',
+  ), false)
   assert.equal(selectLatestRelease([unrelatedRelease]), null)
 })
 
 test('an update is offered only for a newer public portable package', () => {
   assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.2')]), null)
   assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.3')]).version, '0.1.1-rc.3')
-  assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.3', { assetPrefix: 'DeepSeek-Harness' })]).version, '0.1.1-rc.3')
+  assert.equal(availableUpdate('0.1.1-rc.2', [release('0.1.1-rc.3', { assetPrefix: 'DeepSeek-Harness' })]), null)
 })
 
 test('release selection rejects portable releases with extra assets', () => {
@@ -99,6 +128,9 @@ test('release selection requires matching tag and complete asset records', () =>
   const incomplete = release('1.2.1')
   incomplete.assets[0] = { ...incomplete.assets[0], digest: null }
   assert.equal(selectLatestRelease([incomplete]), null)
+  const foreignDownload = release('1.2.1')
+  foreignDownload.assets[0] = { ...foreignDownload.assets[0], browser_download_url: 'https://example.com/update.zip' }
+  assert.equal(selectLatestRelease([foreignDownload]), null)
 })
 
 test('release pagination reaches a portable package after a full unrelated page', async () => {

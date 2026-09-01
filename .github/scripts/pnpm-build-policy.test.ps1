@@ -97,18 +97,18 @@ try {
 
   $metadataFixture = Join-Path $testRoot 'metadata-fallback'
   New-Item -ItemType Directory -Path (Join-Path $metadataFixture 'node_modules') -Force | Out-Null
-  '{"pendingBuilds":[]}' | Set-Content -LiteralPath (Join-Path $metadataFixture 'node_modules\.modules.yaml') -Encoding utf8
-  Assert-DshPnpmModulesHaveNoPendingBuilds -TargetDirectory $metadataFixture
-  '{"pendingBuilds":["unreviewed@1.0.0"]}' | Set-Content -LiteralPath (Join-Path $metadataFixture 'node_modules\.modules.yaml') -Encoding utf8
+  '{"allowBuilds":{"reviewed":false},"pendingBuilds":["reviewed@1.0.0"]}' | Set-Content -LiteralPath (Join-Path $metadataFixture 'node_modules\.modules.yaml') -Encoding utf8
+  Assert-DshPnpmPendingBuildsReviewed -TargetDirectory $metadataFixture
+  '{"allowBuilds":{"reviewed":false},"pendingBuilds":["unreviewed@1.0.0"]}' | Set-Content -LiteralPath (Join-Path $metadataFixture 'node_modules\.modules.yaml') -Encoding utf8
   $metadataRejected = $false
   try {
-    Assert-DshPnpmModulesHaveNoPendingBuilds -TargetDirectory $metadataFixture
+    Assert-DshPnpmPendingBuildsReviewed -TargetDirectory $metadataFixture
   } catch {
     if ($_.Exception.Message -notmatch 'unreviewed@1.0.0') { throw }
     $metadataRejected = $true
   }
   if (-not $metadataRejected) { throw 'module metadata fallback accepted a pending lifecycle script' }
-  Write-Output 'PASS module metadata fallback accepts only an empty pending build set'
+  Write-Output 'PASS module metadata fallback accepts only reviewed pending builds'
 } finally {
   $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([char]'\', [char]'/')
   $resolved = [IO.Path]::GetFullPath($testRoot)

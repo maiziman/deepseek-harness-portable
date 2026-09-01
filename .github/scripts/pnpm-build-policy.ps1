@@ -1,7 +1,7 @@
 # Fail closed when pnpm discovers an unreviewed dependency lifecycle script.
 Set-StrictMode -Version Latest
 
-function Assert-DshPnpmModulesHaveNoPendingBuilds {
+function Assert-DshPnpmPendingBuildsReviewed {
   param([Parameter(Mandatory)][string]$TargetDirectory)
 
   $nodeModules = Join-Path $TargetDirectory 'node_modules'
@@ -18,8 +18,19 @@ function Assert-DshPnpmModulesHaveNoPendingBuilds {
   $pendingProperty = $metadata.PSObject.Properties['pendingBuilds']
   if ($null -eq $pendingProperty) { throw "pnpm module metadata has no pendingBuilds record in $TargetDirectory" }
   $pending = @($pendingProperty.Value | ForEach-Object { [string]$_ })
-  if ($pending.Count -gt 0) {
-    throw "pnpm blocked an unreviewed dependency lifecycle script in ${TargetDirectory}: $($pending -join ', ')"
+  $allowBuildsProperty = $metadata.PSObject.Properties['allowBuilds']
+  if ($null -eq $allowBuildsProperty -or $null -eq $allowBuildsProperty.Value) {
+    throw "pnpm module metadata has no allowBuilds record in $TargetDirectory"
+  }
+  $reviewedNames = @($allowBuildsProperty.Value.PSObject.Properties | ForEach-Object { [string]$_.Name })
+  $unreviewed = @($pending | Where-Object {
+    $locator = $_
+    -not @($reviewedNames | Where-Object {
+      $locator.StartsWith("${_}@", [StringComparison]::Ordinal)
+    }).Count
+  })
+  if ($unreviewed.Count -gt 0) {
+    throw "pnpm blocked an unreviewed dependency lifecycle script in ${TargetDirectory}: $($unreviewed -join ', ')"
   }
 }
 
@@ -36,8 +47,8 @@ function Assert-DshPnpmBuildScriptsComplete {
   if ($exitCode -ne 0) { throw "pnpm ignored-builds failed in $TargetDirectory (exit $exitCode): $text" }
   if ($text -cmatch '(?m)^Automatically ignored builds during installation:\r?$' -and
     $text -cmatch '(?m)^  None\r?$') { return }
-  if ($text -ceq "Automatically ignored builds during installation:`n  Cannot identify as no node_modules found") {
-    Assert-DshPnpmModulesHaveNoPendingBuilds -TargetDirectory $TargetDirectory
+  if ($text -cmatch '\AAutomatically ignored builds during installation:\r?\n  Cannot identify as no node_modules found(?:\r?\n|\z)') {
+    Assert-DshPnpmPendingBuildsReviewed -TargetDirectory $TargetDirectory
     return
   }
   throw "pnpm blocked an unreviewed dependency lifecycle script in ${TargetDirectory}:`n$text"

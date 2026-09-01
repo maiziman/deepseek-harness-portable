@@ -171,7 +171,8 @@ jobs:
         shell: pwsh
         run: |
           & .\.github\scripts\portable-build-metadata.test.ps1
-          node --test .\shell\startup-progress.test.js .\shell\update.test.js .\shell\launch-args.test.js .\shell\process-lifecycle.test.js
+          & .\shell\update-helper.test.ps1
+          node --test .\shell\startup-progress.test.js .\shell\update.test.js .\shell\update-install.test.js .\shell\diagnostics.test.js .\shell\launch-args.test.js .\shell\process-lifecycle.test.js .\plugin\desktop-update\client.test.cjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build portable package

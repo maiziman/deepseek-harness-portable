@@ -35,10 +35,11 @@ No Node.js, installer, or administrator access is required. Windows SmartScreen 
 - **One portable folder:** the app, runtime, settings, sessions, plugins, and logs stay together.
 - **A normal desktop window:** closing the window also stops the local DeepSeek Harness server.
 - **Official tagged source:** the selected upstream tag is built with DeepSeek Harness's own release process and without source patches.
-- **Update prompts:** the app checks published CedarDSH Desktop releases once a day and asks before opening the download page.
+- **One-click updates:** choose **Update** beside Settings to download, verify, and install the latest package built from an official DeepSeek Harness release.
+- **Clear version details:** open **Settings → About** for the desktop version, official DSH version, build time, and last update check.
 - **Clean Windows checks:** every release is built and started on fresh Windows Server 2022 and 2025 runners before publication.
 
-Your data is in `dsh-home` beside the EXE. When updating, close the app, extract the new ZIP, and keep your existing `dsh-home` and `workspace` folders.
+Your data is in `dsh-home` beside the EXE. The updater replaces only program-owned files; it never replaces `dsh-home`, `workspace`, or unknown files you placed beside the app.
 
 > [!IMPORTANT]
 > CedarDSH Desktop is an independent community package, not a DeepSeek product or official release channel. “DeepSeek Harness” and its whale mark identify the packaged upstream software.
@@ -52,7 +53,8 @@ Need a custom OpenAI-compatible model to report whether it supports reasoning or
 - **Uninstall:** close the app and delete its folder. No installer or registry entry is created.
 - **Back up:** copy `dsh-home`; your selected workspaces remain in their original locations.
 - **First launch is slow:** the startup page shows real completed stages while Windows security software scans the package. Later launches are usually faster.
-- **Updates are not silent:** the app only shows a prompt. You choose when to download and replace the program files.
+- **Updates are not silent:** click **Update** beside Settings, review the version, and confirm. The ZIP is checked against the SHA-256 published by GitHub before the app restarts.
+- **Report a problem:** choose **Copy diagnostics** under **Settings → About**, then paste the result into a GitHub Issue. It contains no log text, API keys, or access tokens.
 - **Command line:** run `dsh.cmd web` for the Web UI or `dsh.cmd --profile headless "task"` for one headless task.
 
 ## Build and verification

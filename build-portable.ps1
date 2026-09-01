@@ -401,6 +401,14 @@ if (Test-Path -LiteralPath (Join-Path $app 'app')) { throw 'build app staging un
 $metadataNormalization = Normalize-DshPortableBuildMetadata (Join-Path $app 'node_modules')
 Assert-DshPortableBuildMetadataClean (Join-Path $app 'node_modules')
 Write-Output "=== normalized $($metadataNormalization.SourceAnnotations) source and $($metadataNormalization.ShimAnnotations) shim annotations ==="
+$desktopUpdateSource = Join-Path $psRoot 'plugin\desktop-update'
+$desktopUpdateTarget = Join-Path $app 'node_modules\@cedardsh\desktop-update'
+if (-not (Test-Path -LiteralPath (Join-Path $desktopUpdateSource 'lib\client.js') -PathType Leaf)) {
+  throw "CedarDSH update client package is incomplete: $desktopUpdateSource"
+}
+New-Item -ItemType Directory -Force -Path $desktopUpdateTarget | Out-Null
+Copy-Item -LiteralPath (Join-Path $desktopUpdateSource 'package.json') -Destination $desktopUpdateTarget -Force
+Copy-Item -LiteralPath (Join-Path $desktopUpdateSource 'lib') -Destination $desktopUpdateTarget -Recurse -Force
 $dshBin = Join-Path $app 'node_modules\@deepseek-ai\dsh\lib\bin.js'
 if (-not (Test-Path $dshBin)) { throw "dsh bin missing after install: $dshBin" }
 $dshPkg = Get-Content (Join-Path $app 'node_modules\@deepseek-ai\dsh\package.json') | ConvertFrom-Json
@@ -438,8 +446,12 @@ Copy-Item (Join-Path $psRoot 'shell\main.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\startup-progress.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\launch-args.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\process-lifecycle.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\diagnostics.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\deepseek-mark.svg') $stagingShell -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'shell\update.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\update-install.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\update-helper.ps1') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\cedardsh.patch.yml') $stagingShell
 $stagedIcon = Join-Path $stagingShell 'icon.ico'
 Copy-Item (Join-Path $psRoot 'shell\icon.ico') $stagedIcon -ErrorAction Stop
 
@@ -452,7 +464,7 @@ $packagerCli = @(
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $packagerCli) { throw '@electron/packager bin not found under shell-tools' }
 & (Join-Path $build 'runtime\node.exe') $packagerCli $stagingShell `
-  --platform win32 --arch x64 --out $profile --overwrite `
+  --platform win32 --arch x64 --out $profile --overwrite --no-asar `
   --icon $stagedIcon `
   --executable-name 'CedarDSH-Desktop' `
   "--win32metadata.ProductName=$productName" `
@@ -489,6 +501,11 @@ Set-Content (Join-Path $pkg 'README.txt') -Value $readme -Encoding utf8 -NoNewli
 Copy-Item (Join-Path $psRoot 'THIRD_PARTY_NOTICES.md') (Join-Path $pkg 'THIRD_PARTY_NOTICES.md') -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'dsh.cmd') (Join-Path $pkg 'dsh.cmd')
 
+$ownedTopLevelEntries = @(
+  @(Get-ChildItem -LiteralPath $pkg -Force | Where-Object { $_.Name -notin @('dsh-home', 'workspace') } | ForEach-Object Name)
+  'manifest.json'
+) | Sort-Object -Unique
+
 $manifest = [ordered]@{
   name = 'CedarDSH Desktop'
   platform = 'win32'; arch = 'x64'
@@ -499,6 +516,7 @@ $manifest = [ordered]@{
   pnpmPackageSha256 = $pnpmSha256
   electronVersion = $ElectronVersion
   updateFeed = 'https://github.com/maiziman/cedardsh-desktop/releases'
+  ownedTopLevelEntries = $ownedTopLevelEntries
   dshSource = if ($officialPackageInput) {
     [ordered]@{
       kind = 'official-git-tag'
