@@ -672,8 +672,10 @@ function shutdown(code) {
 }
 
 function fatal(message) {
-  try { dialog.showErrorBox('CedarDSH Desktop', message) } catch { /* no window yet */ }
   console.error(`dsh-shell: ${message}`)
+  if (!SMOKE) {
+    try { dialog.showErrorBox('CedarDSH Desktop', message) } catch { /* no window yet */ }
+  }
   shutdown(1)
 }
 
