@@ -302,6 +302,7 @@ $ownedBuildPaths = @(
   (Join-Path $build 'runtime'),
   (Join-Path $build 'pnpm'),
   (Join-Path $build 'smoke.png'),
+  (Join-Path $build 'smoke.stderr.log'),
   (Join-Path $build 'startup-progress.png'),
   (Join-Path $build "node-$NodeVersion-win-x64.zip"),
   (Join-Path $build "node-$NodeVersion-win-x64")
@@ -554,6 +555,7 @@ $manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $pkg 'manifest.json
 if (-not $SkipSmoke) {
   Write-Output '=== smoke: launching CedarDSH-Desktop.exe ==='
   $smokeOut = Join-Path $build 'smoke.png'
+  $smokeError = Join-Path $build 'smoke.stderr.log'
   $startupSmokeOut = Join-Path $build 'startup-progress.png'
   $envOld = @{
     DSH_SMOKE = $env:DSH_SMOKE
@@ -566,7 +568,11 @@ if (-not $SkipSmoke) {
     $env:DSH_SMOKE_OUT = $smokeOut
     $env:DSH_SMOKE_PROGRESS_OUT = $startupSmokeOut
     $env:DSH_SMOKE_PROGRESS_STATE_OUT = ''
-    $proc = Start-Process -FilePath (Join-Path $pkg 'CedarDSH-Desktop.exe') -WorkingDirectory $pkg -PassThru
+    $proc = Start-Process `
+      -FilePath (Join-Path $pkg 'CedarDSH-Desktop.exe') `
+      -WorkingDirectory $pkg `
+      -RedirectStandardError $smokeError `
+      -PassThru
     $smokeTimeoutMs = 270000
     if (-not $proc.WaitForExit($smokeTimeoutMs)) {
       $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'

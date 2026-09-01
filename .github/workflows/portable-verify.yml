@@ -176,6 +176,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build portable package
+        id: build
         shell: pwsh
         env:
           DSH_VERSION: ${{ needs.resolve-dsh-version.outputs.dsh_version }}
@@ -190,6 +191,25 @@ jobs:
             -DshSourceTag $env:SOURCE_TAG `
             -DshSourceSha $env:SOURCE_SHA `
             -ElectronMirror github
+
+      - name: Locate smoke failure diagnostics
+        id: smoke_diagnostics
+        if: failure() && steps.build.outcome == 'failure'
+        shell: pwsh
+        run: |
+          $path = '.build\smoke.stderr.log'
+          $available = (Test-Path -LiteralPath $path -PathType Leaf) -and (Get-Item -LiteralPath $path).Length -gt 0
+          "available=$($available.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+
+      - name: Upload smoke failure diagnostics
+        if: failure() && steps.build.outcome == 'failure' && steps.smoke_diagnostics.outputs.available == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dsh-portable-smoke-failure-${{ matrix.os }}-${{ needs.resolve-dsh-version.outputs.portable_version }}
+          path: .build/smoke.stderr.log
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 3
 
       - name: Verify package (compatibility probe)
         shell: pwsh
