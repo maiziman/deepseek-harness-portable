@@ -880,14 +880,15 @@ async function serveServerUrl(url) {
               await dismiss(['稍后配置', 'Configure later'])
             })()`, true)
             const settingsOpened = await targetWindow.webContents.executeJavaScript(`(() => {
-              const trigger = [...document.querySelectorAll('button')]
-                .find(button => ['设置', 'Settings'].includes(button.textContent?.trim() ?? '')
-                  && button.getBoundingClientRect().height > 0)
+              const updateButton = document.querySelector('[data-cedardsh-update]')
+              const actionContainer = updateButton?.parentElement?.parentElement?.parentElement
+              const settingsArea = actionContainer?.nextElementSibling
+              const trigger = settingsArea?.querySelector('button')
               if (!(trigger instanceof HTMLButtonElement)) return false
               trigger.click()
               return true
             })()`, true)
-            if (!settingsOpened) throw new Error('Settings trigger was not found beside the update button')
+            if (!settingsOpened) throw new Error('Settings trigger was not found adjacent to the update button')
             await new Promise(resolve => setTimeout(resolve, 500))
             const aboutOpened = await targetWindow.webContents.executeJavaScript(`(() => {
               const trigger = [...document.querySelectorAll('button')]
