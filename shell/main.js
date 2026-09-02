@@ -18,7 +18,7 @@
 //   DSH_DEVTOOLS=1         open detached DevTools.
 'use strict'
 
-const { app, BrowserWindow, clipboard, dialog, shell: electronShell } = require('electron')
+const { app, BrowserWindow, clipboard, dialog, net, shell: electronShell } = require('electron')
 const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
@@ -480,7 +480,7 @@ async function checkForUpdate(respectInterval) {
     return { skipped: true, manifest, currentPortableVersion, update: null }
   }
   try {
-    const update = availableUpdate(currentPortableVersion, await fetchPublicReleases())
+    const update = availableUpdate(currentPortableVersion, await fetchPublicReleases(net.fetch))
     return { skipped: false, manifest, currentPortableVersion, update }
   } finally {
     state.lastCheckedAt = new Date().toISOString()
@@ -504,6 +504,7 @@ async function stageAndLaunchUpdate(update, currentManifest) {
     const archive = path.join(work, update.asset.name)
     let lastProgressAt = 0
     await downloadReleaseAsset(update.asset, archive, {
+      requestImpl: net.request,
       onProgress: (progress) => {
         const now = Date.now()
         if (progress.transferred !== progress.total && now - lastProgressAt < 100) return

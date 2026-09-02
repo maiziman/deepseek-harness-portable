@@ -1,9 +1,9 @@
 'use strict'
 
+const { Readable } = require('node:stream')
+
 // Selects verified portable versions from public GitHub Releases and performs
 // the bounded network request used by the desktop shell's opt-in update prompt.
-
-const https = require('node:https')
 
 const RELEASES_URL = 'https://api.github.com/repos/maiziman/cedardsh-desktop/releases'
 const RELEASE_PATH_PREFIX = '/maiziman/cedardsh-desktop/releases/'
@@ -225,44 +225,35 @@ function shouldCheck(lastCheckedAt, now = Date.now()) {
  * Fetch one public GitHub Releases page with bounded memory and time.
  *
  * @param {number} page One-based page number.
+ * @param {typeof fetch} fetchImpl Electron network fetch implementation.
  * @returns {Promise<unknown>} Parsed GitHub response page.
  */
-function requestReleasePage(page) {
-  return new Promise((resolve, reject) => {
-    const request = https.get(`${RELEASES_URL}?per_page=${RELEASE_PAGE_SIZE}&page=${page}`, {
-      headers: {
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'cedardsh-desktop-update-check',
-        'X-GitHub-Api-Version': '2022-11-28',
-      },
-    }, (response) => {
-      if (response.statusCode !== 200) {
-        response.resume()
-        reject(new Error(`GitHub Releases returned HTTP ${String(response.statusCode)}`))
-        return
-      }
-      const chunks = []
-      let size = 0
-      response.on('data', (chunk) => {
-        size += chunk.length
-        if (size > MAX_RESPONSE_BYTES) {
-          request.destroy(new Error('GitHub Releases response exceeded 1 MiB'))
-          return
-        }
-        chunks.push(chunk)
-      })
-      response.on('end', () => {
-        try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')))
-        } catch (error) {
-          reject(new Error(`GitHub Releases returned invalid JSON: ${error.message}`))
-        }
-      })
-      response.on('error', reject)
-    })
-    request.setTimeout(REQUEST_TIMEOUT_MS, () => request.destroy(new Error('GitHub Releases request timed out')))
-    request.on('error', reject)
+async function requestReleasePage(page, fetchImpl) {
+  const response = await fetchImpl(`${RELEASES_URL}?per_page=${RELEASE_PAGE_SIZE}&page=${page}`, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'cedardsh-desktop-update-check',
+      'X-GitHub-Api-Version': '2022-11-28',
+    },
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   })
+  if (response.status !== 200) {
+    await response.body?.cancel()
+    throw new Error(`GitHub Releases returned HTTP ${String(response.status)}`)
+  }
+  if (response.body === null) throw new Error('GitHub Releases returned no body')
+  const chunks = []
+  let size = 0
+  for await (const chunk of Readable.fromWeb(response.body)) {
+    size += chunk.length
+    if (size > MAX_RESPONSE_BYTES) throw new Error('GitHub Releases response exceeded 1 MiB')
+    chunks.push(chunk)
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch (error) {
+    throw new Error(`GitHub Releases returned invalid JSON: ${error.message}`)
+  }
 }
 
 /**
@@ -285,10 +276,12 @@ async function collectReleasePages(fetchPage) {
 /**
  * Fetch the bounded public GitHub Releases collection.
  *
+ * @param {typeof fetch} fetchImpl Electron network fetch implementation.
  * @returns {Promise<object[]>} Parsed GitHub Release entries.
  */
-function fetchPublicReleases() {
-  return collectReleasePages(requestReleasePage)
+function fetchPublicReleases(fetchImpl) {
+  if (typeof fetchImpl !== 'function') throw new TypeError('fetchImpl must be a function')
+  return collectReleasePages(page => requestReleasePage(page, fetchImpl))
 }
 
 module.exports = {

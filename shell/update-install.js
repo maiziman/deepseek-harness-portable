@@ -3,11 +3,14 @@
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
-const { Readable, Transform } = require('node:stream')
+const { Transform } = require('node:stream')
 const { pipeline } = require('node:stream/promises')
 
 const UPDATE_REQUEST_PATH = '/__cedardsh/update'
 const UPDATE_DIRECTORY = '.cedardsh-update'
+const DOWNLOAD_CONNECTION_TIMEOUT_MS = 30 * 1000
+const DOWNLOAD_IDLE_TIMEOUT_MS = 120 * 1000
+const MAX_DOWNLOAD_REDIRECTS = 5
 const PRESERVED_ENTRIES = new Set(['dsh-home', 'workspace'])
 const REQUIRED_OWNED_ENTRIES = [
   'app',
@@ -85,6 +88,57 @@ function formatBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+/** Open a GitHub Release asset through Electron's Chromium network stack. */
+function openReleaseAsset(requestImpl, downloadUrl, connectionTimeoutMs = DOWNLOAD_CONNECTION_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let redirects = 0
+    let finished = false
+    const request = requestImpl({ method: 'GET', url: downloadUrl, redirect: 'manual' })
+    const connectionTimeout = setTimeout(() => {
+      finished = true
+      request.abort()
+      reject(new Error('release download connection timed out'))
+    }, connectionTimeoutMs)
+    request.setHeader('User-Agent', 'cedardsh-desktop-updater')
+    request.on('redirect', (_statusCode, _method, redirectUrl) => {
+      if (finished) return
+      redirects += 1
+      if (redirects > MAX_DOWNLOAD_REDIRECTS) {
+        finished = true
+        clearTimeout(connectionTimeout)
+        request.abort()
+        reject(new Error('release download exceeded 5 redirects'))
+        return
+      }
+      if (!isTrustedDownloadUrl(redirectUrl)) {
+        finished = true
+        clearTimeout(connectionTimeout)
+        request.abort()
+        reject(new Error('release download redirected outside GitHub'))
+        return
+      }
+      request.followRedirect()
+    })
+    request.on('response', (response) => {
+      if (finished) {
+        response.destroy()
+        return
+      }
+      finished = true
+      clearTimeout(connectionTimeout)
+      resolve({ request, response })
+    })
+    request.on('error', (error) => {
+      if (!finished) {
+        finished = true
+        clearTimeout(connectionTimeout)
+        reject(new Error(`release download connection failed: ${error.message}`, { cause: error }))
+      }
+    })
+    request.end()
+  })
+}
+
 /** Download one selected Release asset and verify its exact size and SHA-256. */
 async function downloadReleaseAsset(asset, destination, options = {}) {
   if (asset === null || typeof asset !== 'object') throw new TypeError('asset metadata is required')
@@ -93,26 +147,34 @@ async function downloadReleaseAsset(asset, destination, options = {}) {
   if (typeof asset.sha256 !== 'string' || !/^[0-9a-f]{64}$/u.test(asset.sha256)) {
     throw new Error('release asset SHA-256 is invalid')
   }
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch
-  if (typeof fetchImpl !== 'function') throw new Error('fetch is unavailable')
+  const requestImpl = options.requestImpl
+  if (typeof requestImpl !== 'function') throw new TypeError('requestImpl must be a function')
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {}
   const partial = `${destination}.partial`
   fs.mkdirSync(path.dirname(destination), { recursive: true })
   fs.rmSync(partial, { force: true })
 
   try {
-    const response = await fetchImpl(asset.downloadUrl, {
-      redirect: 'follow',
-      headers: { 'User-Agent': 'cedardsh-desktop-updater' },
-    })
-    if (!response.ok) throw new Error(`release download returned HTTP ${String(response.status)}`)
-    if (!isTrustedDownloadUrl(response.url)) throw new Error('release download redirected outside GitHub')
-    if (response.body === null) throw new Error('release download returned no body')
+    const { request, response } = await openReleaseAsset(requestImpl, asset.downloadUrl)
+    if (response.statusCode !== 200) {
+      request.abort()
+      throw new Error(`release download returned HTTP ${String(response.statusCode)}`)
+    }
 
     let transferred = 0
+    let idleTimeout
+    let downloadIdle = false
+    const resetIdleTimeout = () => {
+      clearTimeout(idleTimeout)
+      idleTimeout = setTimeout(() => {
+        downloadIdle = true
+        request.abort()
+      }, options.idleTimeoutMs ?? DOWNLOAD_IDLE_TIMEOUT_MS)
+    }
     const hash = crypto.createHash('sha256')
     const meter = new Transform({
       transform(chunk, _encoding, callback) {
+        resetIdleTimeout()
         transferred += chunk.length
         if (transferred > asset.size) {
           callback(new Error('release download exceeded the published size'))
@@ -123,11 +185,20 @@ async function downloadReleaseAsset(asset, destination, options = {}) {
         callback(null, chunk)
       },
     })
-    await pipeline(
-      Readable.fromWeb(response.body),
-      meter,
-      fs.createWriteStream(partial, { flags: 'w' }),
-    )
+    resetIdleTimeout()
+    try {
+      await pipeline(
+        response,
+        meter,
+        fs.createWriteStream(partial, { flags: 'w' }),
+      )
+    } catch (error) {
+      request.abort()
+      if (downloadIdle) throw new Error('release download stalled with no incoming data', { cause: error })
+      throw error
+    } finally {
+      clearTimeout(idleTimeout)
+    }
     if (transferred !== asset.size) {
       throw new Error(`release download size mismatch: ${String(transferred)} != ${String(asset.size)}`)
     }
@@ -250,6 +321,7 @@ module.exports = {
   isDesktopRequest,
   isDesktopUpdateRequest,
   isTrustedDownloadUrl,
+  openReleaseAsset,
   ownedTopLevelEntries,
   removeUpdateTree,
   updateWorkDirectory,

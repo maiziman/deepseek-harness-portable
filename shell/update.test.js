@@ -7,6 +7,7 @@ const {
   CHECK_INTERVAL_MS,
   availableUpdate,
   collectReleasePages,
+  fetchPublicReleases,
   isNewerVersion,
   isTrustedAssetUrl,
   isTrustedReleaseUrl,
@@ -147,6 +148,30 @@ test('release pagination reaches a portable package after a full unrelated page'
   })
   assert.deepEqual(requested, [1, 2])
   assert.equal(selectLatestRelease(releases).version, '0.2.0-alpha.1')
+})
+
+test('release pages use the injected desktop network fetch implementation', async () => {
+  const requests = []
+  const releases = await fetchPublicReleases(async (url, options) => {
+    requests.push({ url, options })
+    return new Response(JSON.stringify([release('1.3.2')]), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })
+  })
+  assert.equal(releases.length, 1)
+  assert.match(requests[0].url, /per_page=100&page=1$/u)
+  assert.equal(requests[0].options.headers['User-Agent'], 'cedardsh-desktop-update-check')
+  assert.ok(requests[0].options.signal instanceof AbortSignal)
+})
+
+test('release queries cancel unsuccessful response bodies', async () => {
+  let cancelled = false
+  const body = new ReadableStream({
+    cancel() { cancelled = true },
+  })
+  await assert.rejects(fetchPublicReleases(async () => new Response(body, { status: 503 })), /HTTP 503/u)
+  assert.equal(cancelled, true)
 })
 
 test('release pagination fails closed at its bounded page limit', async () => {

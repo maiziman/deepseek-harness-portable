@@ -2,9 +2,11 @@
 
 const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
+const { EventEmitter } = require('node:events')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
+const { Readable } = require('node:stream')
 const test = require('node:test')
 
 const {
@@ -13,16 +15,33 @@ const {
   isDesktopRequest,
   isDesktopUpdateRequest,
   isTrustedDownloadUrl,
+  openReleaseAsset,
   ownedTopLevelEntries,
   removeUpdateTree,
   updateWorkDirectory,
   validateStagedPackage,
 } = require('./update-install.js')
 
-function responseFor(payload, url = 'https://release-assets.githubusercontent.com/cedardsh/update.zip') {
-  const response = new Response(payload, { status: 200 })
-  Object.defineProperty(response, 'url', { value: url })
+function responseFor(payload) {
+  const response = Readable.from([payload])
+  response.statusCode = 200
   return response
+}
+
+function requestFor(payload, redirectUrl, tracker) {
+  return (options) => {
+    const request = new EventEmitter()
+    request.options = options
+    request.setHeader = () => {}
+    request.abort = () => { request.aborted = true }
+    request.followRedirect = () => queueMicrotask(() => request.emit('response', responseFor(payload)))
+    request.end = () => queueMicrotask(() => {
+      if (redirectUrl === undefined) request.emit('response', responseFor(payload))
+      else request.emit('redirect', 302, 'GET', redirectUrl, {})
+    })
+    if (tracker !== undefined) tracker.request = request
+    return request
+  }
 }
 
 test('the sidebar request must target the running local DSH origin', () => {
@@ -58,7 +77,7 @@ test('asset downloads stay on GitHub and match the published digest and size', a
   }
 
   await downloadReleaseAsset(asset, destination, {
-    fetchImpl: async () => responseFor(payload),
+    requestImpl: requestFor(payload, 'https://release-assets.githubusercontent.com/cedardsh/update.zip'),
     onProgress: state => progress.push(state),
   })
 
@@ -66,6 +85,80 @@ test('asset downloads stay on GitHub and match the published digest and size', a
   assert.deepEqual(progress.at(-1), { transferred: payload.length, total: payload.length })
   assert.equal(isTrustedDownloadUrl('https://objects.githubusercontent.com/releases/file'), true)
   assert.equal(isTrustedDownloadUrl('http://github.com/releases/file'), false)
+})
+
+test('asset downloads reject redirects outside GitHub', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-redirect-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const destination = path.join(directory, 'update.zip')
+  const tracker = {}
+  await assert.rejects(downloadReleaseAsset({
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.3.2/CedarDSH-Desktop-win64-v1.3.2.zip',
+    size: 1,
+    sha256: '0'.repeat(64),
+  }, destination, {
+    requestImpl: requestFor(Buffer.alloc(0), 'https://example.com/update.zip', tracker),
+  }), /redirected outside GitHub/u)
+  assert.equal(tracker.request.aborted, true)
+})
+
+test('asset downloads abort a non-successful HTTP response', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-http-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const tracker = {}
+  const requestImpl = () => {
+    const request = new EventEmitter()
+    const response = responseFor(Buffer.from('unavailable'))
+    response.statusCode = 503
+    request.setHeader = () => {}
+    request.abort = () => { request.aborted = true; response.destroy() }
+    request.end = () => queueMicrotask(() => request.emit('response', response))
+    tracker.request = request
+    return request
+  }
+  await assert.rejects(downloadReleaseAsset({
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1/update.zip',
+    size: 1,
+    sha256: '0'.repeat(64),
+  }, path.join(directory, 'update.zip'), { requestImpl }), /HTTP 503/u)
+  assert.equal(tracker.request.aborted, true)
+})
+
+test('asset downloads stop when the GitHub connection does not respond', async () => {
+  const requestImpl = () => {
+    const request = new EventEmitter()
+    request.setHeader = () => {}
+    request.abort = () => {}
+    request.end = () => {}
+    return request
+  }
+  await assert.rejects(
+    openReleaseAsset(requestImpl, 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1/update.zip', 1),
+    /connection timed out/u,
+  )
+})
+
+test('asset downloads stop when an open connection sends no data', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-idle-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const destination = path.join(directory, 'update.zip')
+  const requestImpl = () => {
+    const request = new EventEmitter()
+    const response = new Readable({ read() {} })
+    response.statusCode = 200
+    request.setHeader = () => {}
+    request.followRedirect = () => {}
+    request.abort = () => response.destroy(new Error('request aborted'))
+    request.end = () => queueMicrotask(() => request.emit('response', response))
+    return request
+  }
+  await assert.rejects(downloadReleaseAsset({
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1/update.zip',
+    size: 1,
+    sha256: '0'.repeat(64),
+  }, destination, { requestImpl, idleTimeoutMs: 1 }), /stalled with no incoming data/u)
+  assert.equal(fs.existsSync(destination), false)
+  assert.equal(fs.existsSync(`${destination}.partial`), false)
 })
 
 test('a digest mismatch leaves no partial download', async (t) => {
@@ -77,7 +170,22 @@ test('a digest mismatch leaves no partial download', async (t) => {
     downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.3.0/CedarDSH-Desktop-win64-v1.3.0.zip',
     size: payload.length,
     sha256: '0'.repeat(64),
-  }, destination, { fetchImpl: async () => responseFor(payload) }), /SHA-256 mismatch/u)
+  }, destination, { requestImpl: requestFor(payload) }), /SHA-256 mismatch/u)
+  assert.equal(fs.existsSync(destination), false)
+  assert.equal(fs.existsSync(`${destination}.partial`), false)
+})
+
+test('asset downloads abort when the response exceeds the published size', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-size-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const destination = path.join(directory, 'update.zip')
+  const tracker = {}
+  await assert.rejects(downloadReleaseAsset({
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1/update.zip',
+    size: 1,
+    sha256: '0'.repeat(64),
+  }, destination, { requestImpl: requestFor(Buffer.from('too large'), undefined, tracker) }), /exceeded the published size/u)
+  assert.equal(tracker.request.aborted, true)
   assert.equal(fs.existsSync(destination), false)
   assert.equal(fs.existsSync(`${destination}.partial`), false)
 })
