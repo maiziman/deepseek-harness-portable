@@ -12,6 +12,11 @@ on:
         description: Optional expected dsh version; it must be the unique highest official tag
         required: false
         type: string
+      repackage_latest:
+        description: Publish the next portable patch even when the latest DSH is already packaged
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -30,6 +35,7 @@ jobs:
       previous_portable_sha: ${{ steps.detect.outputs.previous_portable_sha }}
       previous_portable_tag: ${{ steps.detect.outputs.previous_portable_tag }}
       prerelease: ${{ steps.detect.outputs.prerelease }}
+      repackage_latest: ${{ steps.detect.outputs.repackage_latest }}
       should_build: ${{ steps.detect.outputs.should_build }}
       source_sha: ${{ steps.detect.outputs.source_sha }}
       source_tag: ${{ steps.detect.outputs.source_tag }}
@@ -51,6 +57,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          REPACKAGE_LATEST: ${{ inputs.repackage_latest }}
           REPOSITORY: ${{ github.repository }}
           REQUESTED_VERSION: ${{ inputs.dsh_version }}
         run: |
@@ -118,11 +125,29 @@ jobs:
             -DshVersion $version `
             -ExpectedSourceTag $sourceTag `
             -ExpectedSourceSha $sourceSha
-          $alreadyPackaged = [bool]$policy.AlreadyPackaged
-          $portableVersion = [string]$policy.PortableVersion
-          $releaseTag = [string]$policy.ReleaseTag
-          $assetName = [string]$policy.AssetName
-          $previousPortableTag = [string]$policy.PreviousPortableTag
+          $repackageLatest = $env:REPACKAGE_LATEST -eq 'true'
+          if ($repackageLatest) {
+            $completePortable = @(Get-DshCompletePortableReleases -Releases $allReleases)
+            $highestPortableVersion = ''
+            $previousPortableTag = ''
+            if ($completePortable.Count -gt 0) {
+              $previousPortable = Get-DshUniqueHighestSemverRecord -Records $completePortable -Description 'complete portable Releases'
+              $highestPortableVersion = [string]$previousPortable.Version
+              $previousPortableTag = [string]$previousPortable.Tag
+            }
+            $portableVersion = Get-DshNextPortableVersion -HighestVersion $highestPortableVersion
+            $releaseTag = "v$portableVersion"
+            $assetName = "CedarDSH-Desktop-win64-v$portableVersion.zip"
+            $alreadyPackaged = $false
+            $releasePrerelease = $false
+          } else {
+            $alreadyPackaged = [bool]$policy.AlreadyPackaged
+            $portableVersion = [string]$policy.PortableVersion
+            $releaseTag = [string]$policy.ReleaseTag
+            $assetName = [string]$policy.AssetName
+            $previousPortableTag = [string]$policy.PreviousPortableTag
+            $releasePrerelease = [bool]$policy.Prerelease
+          }
           $previousPortableSha = ''
           if ($previousPortableTag) {
             $previousRecords = @(
@@ -161,14 +186,13 @@ jobs:
               if (Test-Path $remoteSumsPath -PathType Leaf) { Remove-Item -LiteralPath $remoteSumsPath -Force }
             }
           }
-          $releasePrerelease = [bool]$policy.Prerelease
-
           "asset_name=$assetName" >> $env:GITHUB_OUTPUT
           "dsh_version=$version" >> $env:GITHUB_OUTPUT
           "portable_version=$portableVersion" >> $env:GITHUB_OUTPUT
           "prerelease=$($releasePrerelease.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "previous_portable_sha=$previousPortableSha" >> $env:GITHUB_OUTPUT
           "previous_portable_tag=$previousPortableTag" >> $env:GITHUB_OUTPUT
+          "repackage_latest=$($repackageLatest.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "should_build=$(((-not $alreadyPackaged)).ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           "source_sha=$sourceSha" >> $env:GITHUB_OUTPUT
           "source_tag=$sourceTag" >> $env:GITHUB_OUTPUT
@@ -408,6 +432,7 @@ jobs:
           EXPECTED_SOURCE_TAG: ${{ needs.detect.outputs.source_tag }}
           GH_TOKEN: ${{ github.token }}
           PREVIOUS_PORTABLE_TAG: ${{ needs.detect.outputs.previous_portable_tag }}
+          REPACKAGE_LATEST: ${{ needs.detect.outputs.repackage_latest }}
           REPOSITORY: ${{ github.repository }}
         run: |
           $ErrorActionPreference = 'Stop'
@@ -426,18 +451,31 @@ jobs:
             if ($page -eq 100) { throw 'portable Release pagination exceeded 100 pages during publication' }
           }
 
-          $policy = Assert-DshAutomaticPortableAllocationCurrent `
-            -Releases $releases `
-            -DshVersion $env:EXPECTED_DSH_VERSION `
-            -ExpectedPortableVersion $env:EXPECTED_PORTABLE_VERSION `
-            -ExpectedReleaseTag $env:EXPECTED_RELEASE_TAG `
-            -ExpectedPreviousPortableCommit $env:EXPECTED_PREVIOUS_SHA `
-            -ExpectedPreviousPortableTag $env:PREVIOUS_PORTABLE_TAG `
-            -ExpectedSourceTag $env:EXPECTED_SOURCE_TAG `
-            -ExpectedSourceSha $env:EXPECTED_SOURCE_SHA `
-            -AllowExactAlreadyPublic
-          if ($policy.AlreadyPackaged) {
-            Write-Output 'the allocated portable Release was published while this run waited; exact-id staging will validate and skip it'
+          if ($env:REPACKAGE_LATEST -eq 'true') {
+            $allocation = Assert-DshManualPortableAllocationCurrent `
+              -Releases $releases `
+              -CurrentTag $env:EXPECTED_RELEASE_TAG `
+              -CurrentVersion $env:EXPECTED_PORTABLE_VERSION `
+              -ExpectedPreviousPortableCommit $env:EXPECTED_PREVIOUS_SHA `
+              -ExpectedPreviousPortableTag $env:PREVIOUS_PORTABLE_TAG `
+              -AllowExactAlreadyPublic
+            if ($allocation.AlreadyPublic) {
+              Write-Output 'the allocated portable Release was published while this run waited; exact-id staging will validate and skip it'
+            }
+          } else {
+            $policy = Assert-DshAutomaticPortableAllocationCurrent `
+              -Releases $releases `
+              -DshVersion $env:EXPECTED_DSH_VERSION `
+              -ExpectedPortableVersion $env:EXPECTED_PORTABLE_VERSION `
+              -ExpectedReleaseTag $env:EXPECTED_RELEASE_TAG `
+              -ExpectedPreviousPortableCommit $env:EXPECTED_PREVIOUS_SHA `
+              -ExpectedPreviousPortableTag $env:PREVIOUS_PORTABLE_TAG `
+              -ExpectedSourceTag $env:EXPECTED_SOURCE_TAG `
+              -ExpectedSourceSha $env:EXPECTED_SOURCE_SHA `
+              -AllowExactAlreadyPublic
+            if ($policy.AlreadyPackaged) {
+              Write-Output 'the allocated portable Release was published while this run waited; exact-id staging will validate and skip it'
+            }
           }
 
       - name: Stage verified Draft Release by exact id
@@ -517,6 +555,7 @@ jobs:
           EXPECTED_PREVIOUS_SHA: ${{ needs.detect.outputs.previous_portable_sha }}
           RELEASE_ID: ${{ steps.stage.outputs.release_id }}
           PREVIOUS_PORTABLE_TAG: ${{ needs.detect.outputs.previous_portable_tag }}
+          REPACKAGE_LATEST: ${{ needs.detect.outputs.repackage_latest }}
           SOURCE_SHA: ${{ needs.detect.outputs.source_sha }}
           SOURCE_TAG: ${{ needs.detect.outputs.source_tag }}
           TRACK_LATEST: ${{ needs.detect.outputs.track_latest }}
@@ -563,15 +602,24 @@ jobs:
             if ($entries.Count -lt 100) { break }
             if ($page -eq 100) { throw 'portable Release pagination exceeded 100 pages immediately before publication' }
           }
-          Assert-DshAutomaticPortableAllocationCurrent `
-            -Releases $releases `
-            -DshVersion $env:EXPECTED_DSH_VERSION `
-            -ExpectedPortableVersion $env:EXPECTED_PORTABLE_VERSION `
-            -ExpectedReleaseTag $env:RELEASE_TAG `
-            -ExpectedPreviousPortableCommit $env:EXPECTED_PREVIOUS_SHA `
-            -ExpectedPreviousPortableTag $env:PREVIOUS_PORTABLE_TAG `
-            -ExpectedSourceTag $env:SOURCE_TAG `
-            -ExpectedSourceSha $env:SOURCE_SHA | Out-Null
+          if ($env:REPACKAGE_LATEST -eq 'true') {
+            Assert-DshManualPortableAllocationCurrent `
+              -Releases $releases `
+              -CurrentTag $env:RELEASE_TAG `
+              -CurrentVersion $env:EXPECTED_PORTABLE_VERSION `
+              -ExpectedPreviousPortableCommit $env:EXPECTED_PREVIOUS_SHA `
+              -ExpectedPreviousPortableTag $env:PREVIOUS_PORTABLE_TAG | Out-Null
+          } else {
+            Assert-DshAutomaticPortableAllocationCurrent `
+              -Releases $releases `
+              -DshVersion $env:EXPECTED_DSH_VERSION `
+              -ExpectedPortableVersion $env:EXPECTED_PORTABLE_VERSION `
+              -ExpectedReleaseTag $env:RELEASE_TAG `
+              -ExpectedPreviousPortableCommit $env:EXPECTED_PREVIOUS_SHA `
+              -ExpectedPreviousPortableTag $env:PREVIOUS_PORTABLE_TAG `
+              -ExpectedSourceTag $env:SOURCE_TAG `
+              -ExpectedSourceSha $env:SOURCE_SHA | Out-Null
+          }
           if ([bool]$env:PREVIOUS_PORTABLE_TAG -ne [bool]$env:EXPECTED_PREVIOUS_SHA) {
             throw 'previous portable tag and commit must be supplied together immediately before publication'
           }
