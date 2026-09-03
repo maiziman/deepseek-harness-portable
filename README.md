@@ -53,7 +53,7 @@ Need a custom OpenAI-compatible model to report whether it supports reasoning or
 - **Uninstall:** close the app and delete its folder. No installer or registry entry is created.
 - **Back up:** copy `dsh-home`; your selected workspaces remain in their original locations.
 - **First launch is slow:** the startup page shows real completed stages while Windows security software scans the package. Later launches are usually faster.
-- **Updates are not silent:** click **Update** beside Settings, review the version, and confirm. The ZIP is checked against the SHA-256 published by GitHub before the app restarts.
+- **Updates are not silent:** click **Update** beside Settings, review the version, and confirm. The ZIP is checked against the SHA-256 published by GitHub before the app restarts. Downloads resume where they left off: closing the progress window or the app keeps the downloaded portion, and the next update continues from it.
 - **Report a problem:** choose **Copy diagnostics** under **Settings → About**, then paste the result into a GitHub Issue. It contains no log text, API keys, or access tokens.
 - **Command line:** run `dsh.cmd web` for the Web UI or `dsh.cmd --profile headless "task"` for one headless task.
 

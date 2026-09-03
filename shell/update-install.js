@@ -154,8 +154,23 @@ async function extractArchive(archivePath, destinationPath, options) {
   }
 }
 
-/** Open a GitHub Release asset through Electron's Chromium network stack. */
-function openReleaseAsset(requestImpl, downloadUrl, connectionTimeoutMs = DOWNLOAD_CONNECTION_TIMEOUT_MS) {
+/**
+ * Open a GitHub Release asset through Electron's Chromium network stack.
+ *
+ * `options.rangeStart` resumes an earlier partial download by requesting the
+ * asset from that byte offset; the Range header is reapplied across redirects.
+ *
+ * @param {(options: object) => object} requestImpl Electron network request factory.
+ * @param {string} downloadUrl Resolved GitHub asset URL.
+ * @param {number} [connectionTimeoutMs] Connection establishment timeout.
+ * @param {{rangeStart?: number}} [options] Request options.
+ * @returns {Promise<{request: object, response: object}>} Opened request and response.
+ */
+function openReleaseAsset(requestImpl, downloadUrl, connectionTimeoutMs = DOWNLOAD_CONNECTION_TIMEOUT_MS, options = {}) {
+  const rangeStart = options.rangeStart
+  if (rangeStart !== undefined && (!Number.isSafeInteger(rangeStart) || rangeStart <= 0)) {
+    throw new TypeError('rangeStart must be a positive safe integer')
+  }
   return new Promise((resolve, reject) => {
     let redirects = 0
     let finished = false
@@ -166,6 +181,7 @@ function openReleaseAsset(requestImpl, downloadUrl, connectionTimeoutMs = DOWNLO
       reject(new Error('release download connection timed out'))
     }, connectionTimeoutMs)
     request.setHeader('User-Agent', 'cedardsh-desktop-updater')
+    if (rangeStart !== undefined) request.setHeader('Range', `bytes=${String(rangeStart)}-`)
     request.on('redirect', (_statusCode, _method, redirectUrl) => {
       if (finished) return
       redirects += 1
@@ -183,6 +199,7 @@ function openReleaseAsset(requestImpl, downloadUrl, connectionTimeoutMs = DOWNLO
         reject(new Error('release download redirected outside GitHub'))
         return
       }
+      if (rangeStart !== undefined) request.setHeader('Range', `bytes=${String(rangeStart)}-`)
       request.followRedirect()
     })
     request.on('response', (response) => {
@@ -205,7 +222,84 @@ function openReleaseAsset(requestImpl, downloadUrl, connectionTimeoutMs = DOWNLO
   })
 }
 
-/** Download one selected Release asset and verify its exact size and SHA-256. */
+/** Return one response header value regardless of key casing. */
+function responseHeader(response, name) {
+  const headers = response.headers
+  if (headers === null || typeof headers !== 'object') return undefined
+  const target = name.toLowerCase()
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === target) return value
+  }
+  return undefined
+}
+
+/**
+ * Validate the Content-Range of a resumed download response.
+ *
+ * @param {object} response Open download response.
+ * @param {number} resumeOffset Byte offset the Range request asked for.
+ * @param {number} assetSize Published asset size in bytes.
+ * @returns {number} Confirmed resume start offset.
+ */
+function resumeRangeStart(response, resumeOffset, assetSize) {
+  const value = responseHeader(response, 'content-range')
+  if (typeof value !== 'string') {
+    throw new Error('release download resumed without a Content-Range header')
+  }
+  const match = /^bytes\s+(\d+)-(\d+)\/(\d+|\*)$/iu.exec(value.trim())
+  if (match === null) throw new Error(`release download resumed with an invalid Content-Range: ${value}`)
+  const start = Number(match[1])
+  const end = Number(match[2])
+  if (start !== resumeOffset) {
+    throw new Error(`release download resumed from byte ${String(start)} instead of ${String(resumeOffset)}`)
+  }
+  if (end < start) throw new Error(`release download resumed with an inverted Content-Range: ${value}`)
+  if (match[3] !== '*' && Number(match[3]) !== assetSize) {
+    throw new Error(`release download resumed against the wrong asset size: ${match[3]}`)
+  }
+  return start
+}
+
+/**
+ * Return the byte offset a kept partial download can resume from, or 0.
+ *
+ * Only a regular file strictly smaller than the published size is usable;
+ * anything else means a fresh download.
+ *
+ * @param {string} destination Final archive path.
+ * @param {number} size Published asset size in bytes.
+ * @returns {number} Valid resume offset, or 0 for a fresh download.
+ */
+function partialResumeOffset(destination, size) {
+  let stat
+  try {
+    stat = fs.statSync(`${destination}.partial`)
+  } catch (error) {
+    if (error.code === 'ENOENT') return 0
+    throw error
+  }
+  if (!stat.isFile() || stat.size <= 0 || stat.size >= size) return 0
+  return stat.size
+}
+
+/** Feed an existing file into a running hash so a resumed download verifies the whole asset. */
+async function hashFileInto(hash, filePath) {
+  for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk)
+}
+
+/**
+ * Download one selected Release asset and verify its exact size and SHA-256.
+ *
+ * A partial file from an earlier attempt is resumed with an HTTP Range
+ * request; the server is allowed to ignore the Range and restart the
+ * transfer. Interrupted transfers keep the partial file for the next
+ * attempt, while transfers that fail size or digest verification discard it.
+ *
+ * @param {{name: string, downloadUrl: string, size: number, sha256: string}} asset Release asset metadata.
+ * @param {string} destination Final archive path.
+ * @param {{requestImpl: (options: object) => object, onProgress?: (progress: {transferred: number, total: number}) => void, idleTimeoutMs?: number}} [options] Download options.
+ * @returns {Promise<string>} Final archive path.
+ */
 async function downloadReleaseAsset(asset, destination, options = {}) {
   if (asset === null || typeof asset !== 'object') throw new TypeError('asset metadata is required')
   if (!isTrustedDownloadUrl(asset.downloadUrl)) throw new Error('release asset URL is not trusted')
@@ -218,18 +312,39 @@ async function downloadReleaseAsset(asset, destination, options = {}) {
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {}
   const partial = `${destination}.partial`
   fs.mkdirSync(path.dirname(destination), { recursive: true })
-  fs.rmSync(partial, { force: true })
+  const resumeOffset = partialResumeOffset(destination, asset.size)
+  if (resumeOffset === 0) fs.rmSync(partial, { force: true })
 
+  let request = null
+  let transferred = 0
+  let downloadIdle = false
   try {
-    const { request, response } = await openReleaseAsset(requestImpl, asset.downloadUrl)
-    if (response.statusCode !== 200) {
+    const opened = await openReleaseAsset(requestImpl, asset.downloadUrl, undefined, {
+      rangeStart: resumeOffset > 0 ? resumeOffset : undefined,
+    })
+    request = opened.request
+    const response = opened.response
+    let offset = resumeOffset
+    if (offset > 0) {
+      if (response.statusCode === 206) {
+        resumeRangeStart(response, offset, asset.size)
+      } else if (response.statusCode === 200) {
+        offset = 0
+        fs.rmSync(partial, { force: true })
+      } else {
+        request.abort()
+        throw new Error(`release download returned HTTP ${String(response.statusCode)}`)
+      }
+    } else if (response.statusCode !== 200) {
       request.abort()
       throw new Error(`release download returned HTTP ${String(response.statusCode)}`)
     }
 
-    let transferred = 0
+    const hash = crypto.createHash('sha256')
+    if (offset > 0) await hashFileInto(hash, partial)
+    transferred = offset
+    onProgress({ transferred, total: asset.size })
     let idleTimeout
-    let downloadIdle = false
     const resetIdleTimeout = () => {
       clearTimeout(idleTimeout)
       idleTimeout = setTimeout(() => {
@@ -237,7 +352,6 @@ async function downloadReleaseAsset(asset, destination, options = {}) {
         request.abort()
       }, options.idleTimeoutMs ?? DOWNLOAD_IDLE_TIMEOUT_MS)
     }
-    const hash = crypto.createHash('sha256')
     const meter = new Transform({
       transform(chunk, _encoding, callback) {
         resetIdleTimeout()
@@ -256,7 +370,7 @@ async function downloadReleaseAsset(asset, destination, options = {}) {
       await pipeline(
         response,
         meter,
-        fs.createWriteStream(partial, { flags: 'w' }),
+        fs.createWriteStream(partial, { flags: offset > 0 ? 'a' : 'w' }),
       )
     } catch (error) {
       request.abort()
@@ -270,13 +384,14 @@ async function downloadReleaseAsset(asset, destination, options = {}) {
     }
     const actualSha256 = hash.digest('hex')
     if (actualSha256 !== asset.sha256) {
+      fs.rmSync(partial, { force: true })
       throw new Error(`release download SHA-256 mismatch: ${actualSha256}`)
     }
     fs.rmSync(destination, { force: true })
     fs.renameSync(partial, destination)
     return destination
   } catch (error) {
-    fs.rmSync(partial, { force: true })
+    if (transferred > asset.size) fs.rmSync(partial, { force: true })
     throw error
   }
 }
@@ -390,7 +505,9 @@ module.exports = {
   isTrustedDownloadUrl,
   openReleaseAsset,
   ownedTopLevelEntries,
+  partialResumeOffset,
   removeUpdateTree,
+  resumeRangeStart,
   updateWorkDirectory,
   validateStagedPackage,
 }

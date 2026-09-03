@@ -4,6 +4,7 @@ const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const { EventEmitter } = require('node:events')
 const fs = require('node:fs')
+const http = require('node:http')
 const os = require('node:os')
 const path = require('node:path')
 const { PassThrough, Readable } = require('node:stream')
@@ -18,7 +19,9 @@ const {
   isTrustedDownloadUrl,
   openReleaseAsset,
   ownedTopLevelEntries,
+  partialResumeOffset,
   removeUpdateTree,
+  resumeRangeStart,
   updateWorkDirectory,
   validateStagedPackage,
 } = require('./update-install.js')
@@ -55,6 +58,26 @@ function requestFor(payload, redirectUrl, tracker) {
     request.end = () => queueMicrotask(() => {
       if (redirectUrl === undefined) request.emit('response', responseFor(payload))
       else request.emit('redirect', 302, 'GET', redirectUrl, {})
+    })
+    if (tracker !== undefined) tracker.request = request
+    return request
+  }
+}
+
+function resumeRequestFor(parts, tracker, options = {}) {
+  const statusCode = options.statusCode ?? 206
+  const contentRange = options.contentRange
+  return () => {
+    const request = new EventEmitter()
+    request.headers = {}
+    request.setHeader = (name, value) => { request.headers[name.toLowerCase()] = value }
+    request.abort = () => { request.aborted = true }
+    request.followRedirect = () => {}
+    request.end = () => queueMicrotask(() => {
+      const response = Readable.from(parts)
+      response.statusCode = statusCode
+      response.headers = contentRange === undefined ? {} : { 'content-range': contentRange }
+      request.emit('response', response)
     })
     if (tracker !== undefined) tracker.request = request
     return request
@@ -197,27 +220,34 @@ test('asset downloads stop when the GitHub connection does not respond', async (
   )
 })
 
-test('asset downloads stop when an open connection sends no data', async (t) => {
+test('an interrupted download keeps the partial file for a later resume', async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-idle-test-'))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   const destination = path.join(directory, 'update.zip')
+  const prefix = Buffer.from('kept prefix')
+  fs.writeFileSync(`${destination}.partial`, prefix)
+  const tracker = {}
   const requestImpl = () => {
     const request = new EventEmitter()
     const response = new Readable({ read() {} })
-    response.statusCode = 200
-    request.setHeader = () => {}
+    response.statusCode = 206
+    response.headers = { 'content-range': `bytes ${prefix.length}-99/100` }
+    request.headers = {}
+    request.setHeader = (name, value) => { request.headers[name.toLowerCase()] = value }
     request.followRedirect = () => {}
     request.abort = () => response.destroy(new Error('request aborted'))
     request.end = () => queueMicrotask(() => request.emit('response', response))
+    tracker.request = request
     return request
   }
   await assert.rejects(downloadReleaseAsset({
     downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1/update.zip',
-    size: 1,
+    size: 100,
     sha256: '0'.repeat(64),
   }, destination, { requestImpl, idleTimeoutMs: 1 }), /stalled with no incoming data/u)
+  assert.equal(tracker.request.headers.range, `bytes=${prefix.length}-`)
   assert.equal(fs.existsSync(destination), false)
-  assert.equal(fs.existsSync(`${destination}.partial`), false)
+  assert.equal(fs.readFileSync(`${destination}.partial`, 'utf8'), 'kept prefix')
 })
 
 test('a digest mismatch leaves no partial download', async (t) => {
@@ -247,6 +277,167 @@ test('asset downloads abort when the response exceeds the published size', async
   assert.equal(tracker.request.aborted, true)
   assert.equal(fs.existsSync(destination), false)
   assert.equal(fs.existsSync(`${destination}.partial`), false)
+})
+
+test('asset downloads resume a kept partial file with an HTTP Range request', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-resume-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const payload = Buffer.from('first-half-second-half')
+  const half = Math.floor(payload.length / 2)
+  const destination = path.join(directory, 'update.zip')
+  fs.writeFileSync(`${destination}.partial`, payload.subarray(0, half))
+  const progress = []
+  const tracker = {}
+  const asset = {
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.3.0/CedarDSH-Desktop-win64-v1.3.0.zip',
+    size: payload.length,
+    sha256: crypto.createHash('sha256').update(payload).digest('hex'),
+  }
+
+  await downloadReleaseAsset(asset, destination, {
+    requestImpl: resumeRequestFor([payload.subarray(half)], tracker, {
+      contentRange: `bytes ${half}-${payload.length - 1}/${payload.length}`,
+    }),
+    onProgress: state => progress.push(state),
+  })
+
+  assert.equal(tracker.request.headers.range, `bytes=${half}-`)
+  assert.deepEqual(fs.readFileSync(destination), payload)
+  assert.equal(fs.existsSync(`${destination}.partial`), false)
+  assert.deepEqual(progress[0], { transferred: half, total: payload.length })
+  assert.deepEqual(progress.at(-1), { transferred: payload.length, total: payload.length })
+})
+
+test('asset downloads restart from zero when the server ignores the Range header', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-restart-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const payload = Buffer.from('complete replacement payload')
+  const stale = Buffer.from('stale prefix bytes')
+  const destination = path.join(directory, 'update.zip')
+  fs.writeFileSync(`${destination}.partial`, stale)
+  const tracker = {}
+  const asset = {
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.3.0/CedarDSH-Desktop-win64-v1.3.0.zip',
+    size: payload.length,
+    sha256: crypto.createHash('sha256').update(payload).digest('hex'),
+  }
+
+  await downloadReleaseAsset(asset, destination, {
+    requestImpl: resumeRequestFor([payload], tracker, { statusCode: 200 }),
+  })
+
+  assert.equal(tracker.request.headers.range, `bytes=${stale.length}-`)
+  assert.deepEqual(fs.readFileSync(destination), payload)
+  assert.equal(fs.existsSync(`${destination}.partial`), false)
+})
+
+test('a resumed download rejects an unexpected Content-Range start and keeps the partial', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-range-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const payload = Buffer.from('first-half-second-half')
+  const half = Math.floor(payload.length / 2)
+  const destination = path.join(directory, 'update.zip')
+  fs.writeFileSync(`${destination}.partial`, payload.subarray(0, half))
+
+  await assert.rejects(downloadReleaseAsset({
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.3.0/CedarDSH-Desktop-win64-v1.3.0.zip',
+    size: payload.length,
+    sha256: '0'.repeat(64),
+  }, destination, {
+    requestImpl: resumeRequestFor([payload.subarray(half)], {}, {
+      contentRange: `bytes 2-${payload.length - 1}/${payload.length}`,
+    }),
+  }), /resumed from byte 2 instead of 11/u)
+
+  assert.equal(fs.existsSync(destination), false)
+  assert.deepEqual(fs.readFileSync(`${destination}.partial`), payload.subarray(0, half))
+})
+
+test('a resumed download that fails the final digest check discards the partial', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-download-resume-digest-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const payload = Buffer.from('first-half-second-half')
+  const half = Math.floor(payload.length / 2)
+  const destination = path.join(directory, 'update.zip')
+  fs.writeFileSync(`${destination}.partial`, payload.subarray(0, half))
+
+  await assert.rejects(downloadReleaseAsset({
+    downloadUrl: 'https://github.com/maiziman/cedardsh-desktop/releases/download/v1.3.0/CedarDSH-Desktop-win64-v1.3.0.zip',
+    size: payload.length,
+    sha256: crypto.createHash('sha256').update(payload).digest('hex'),
+  }, destination, {
+    requestImpl: resumeRequestFor([Buffer.from('corrupted!!')], {}, {
+      contentRange: `bytes ${half}-${payload.length - 1}/${payload.length}`,
+    }),
+  }), /SHA-256 mismatch/u)
+
+  assert.equal(fs.existsSync(destination), false)
+  assert.equal(fs.existsSync(`${destination}.partial`), false)
+})
+
+test('partial resume offsets require a positive file strictly smaller than the asset', (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-resume-offset-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const destination = path.join(directory, 'update.zip')
+  assert.equal(partialResumeOffset(destination, 100), 0)
+  fs.writeFileSync(`${destination}.partial`, '')
+  assert.equal(partialResumeOffset(destination, 100), 0)
+  fs.writeFileSync(`${destination}.partial`, '0123456789')
+  assert.equal(partialResumeOffset(destination, 100), 10)
+  assert.equal(partialResumeOffset(destination, 10), 0)
+  fs.writeFileSync(`${destination}.partial`, '0123456789A')
+  assert.equal(partialResumeOffset(destination, 10), 0)
+  fs.rmSync(`${destination}.partial`)
+  fs.mkdirSync(`${destination}.partial`)
+  assert.equal(partialResumeOffset(destination, 100), 0)
+})
+
+test('resume range validation rejects wrong starts, totals, and malformed headers', () => {
+  const response = contentRange => ({ headers: { 'content-range': contentRange }, statusCode: 206 })
+  assert.equal(resumeRangeStart(response('bytes 10-99/100'), 10, 100), 10)
+  assert.equal(resumeRangeStart(response('bytes 10-99/*'), 10, 100), 10)
+  assert.throws(() => resumeRangeStart(response('bytes 5-99/100'), 10, 100), /from byte 5 instead of 10/u)
+  assert.throws(() => resumeRangeStart(response('bytes 10-99/101'), 10, 100), /wrong asset size/u)
+  assert.throws(() => resumeRangeStart(response('bytes 10-9/100'), 10, 100), /inverted Content-Range/u)
+  assert.throws(() => resumeRangeStart(response('nonsense'), 10, 100), /invalid Content-Range/u)
+  assert.throws(() => resumeRangeStart({ headers: {} }, 10, 100), /without a Content-Range/u)
+})
+
+test('a real HTTP Range response round-trips resume validation', async (t) => {
+  const payload = crypto.randomBytes(64 * 1024)
+  const half = payload.length / 2
+  const server = http.createServer((request, response) => {
+    const match = /^bytes=(\d+)-$/u.exec(request.headers.range ?? '')
+    if (match === null) {
+      response.writeHead(200, { 'Content-Length': payload.length })
+      response.end(payload)
+      return
+    }
+    const start = Number(match[1])
+    const body = payload.subarray(start)
+    response.writeHead(206, {
+      'Content-Length': body.length,
+      'Content-Range': `bytes ${start}-${payload.length - 1}/${payload.length}`,
+    })
+    response.end(body)
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  t.after(() => new Promise(resolve => server.close(resolve)))
+  const { port } = server.address()
+  const response = await new Promise((resolve, reject) => {
+    const request = http.request({
+      host: '127.0.0.1',
+      port,
+      path: '/update.zip',
+      headers: { Range: `bytes=${half}-` },
+    }, resolve)
+    request.on('error', reject)
+    request.end()
+  })
+  assert.equal(response.statusCode, 206)
+  assert.equal(resumeRangeStart(response, half, payload.length), half)
+  const body = Buffer.concat(await response.toArray())
+  assert.deepEqual(body, payload.subarray(half))
 })
 
 test('staged packages own program files but never portable user data', (t) => {

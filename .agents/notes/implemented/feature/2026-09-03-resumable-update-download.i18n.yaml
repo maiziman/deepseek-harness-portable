@@ -1,0 +1,4 @@
+# Bilingual-pair consistency record: the git blob hash of each side as of the
+# last confirmed-consistent state. Both languages carry equal authority.
+2026-09-03-resumable-update-download.md: 8da0fff74454f6940d285ae8c2a103377cb16018
+2026-09-03-resumable-update-download.zh.md: 8c8afbe88fa9ad29b3851bdcbc18b2dc3b83f030

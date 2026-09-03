@@ -46,6 +46,7 @@ const {
   isDesktopRequest,
   isDesktopUpdateRequest,
   ownedTopLevelEntries,
+  partialResumeOffset,
   removeUpdateTree,
   updateWorkDirectory,
   validateStagedPackage,
@@ -125,6 +126,8 @@ let loadingPageActive = false
 let serverPageUrl = null
 let updateProgressWindow = null
 let updateTask = null
+let activeUpdateRequest = null
+let cancelUpdateRequested = false
 
 function ensureDirs() {
   for (const dir of [DSH_HOME, WORKSPACE, path.dirname(LOG_PATH)]) fs.mkdirSync(dir, { recursive: true })
@@ -345,11 +348,13 @@ function updateCopy() {
         title: 'CedarDSH Desktop 更新',
         checking: '正在检查官方更新…',
         downloading: '正在下载官方主程序…',
+        resuming: '正在继续下载官方主程序…',
         extracting: '正在快速解压更新…',
         preparing: '正在校验更新包…',
         entries: '项',
         restarting: '更新已准备完成，正在重启…',
         preserved: '会话历史、模型设置、凭据、插件和工作区都会保留。',
+        pauseNote: '关闭此窗口会暂停下载，已下载的进度会保留；下次更新时继续。',
         available: version => `发现新版本 ${version}`,
         current: '当前版本',
         next: '新版本',
@@ -363,11 +368,13 @@ function updateCopy() {
         title: 'CedarDSH Desktop update',
         checking: 'Checking for an official update…',
         downloading: 'Downloading the official application…',
+        resuming: 'Resuming the official application download…',
         extracting: 'Extracting the update…',
         preparing: 'Verifying the update…',
         entries: 'items',
         restarting: 'Update is ready. Restarting…',
         preserved: 'Session history, model settings, credentials, plugins, and workspaces will be preserved.',
+        pauseNote: 'Closing this window pauses the download; completed progress is kept and resumes on the next update.',
         available: version => `Version ${version} is available`,
         current: 'Current version',
         next: 'New version',
@@ -384,7 +391,7 @@ function updateProgressPage(copy) {
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{color-scheme:dark;font-family:"Segoe UI",system-ui,sans-serif}*{box-sizing:border-box}body{margin:0;background:#15171d;color:#f4f5f7}.card{padding:28px 30px}.title{font-size:18px;font-weight:600}.stage{margin-top:18px;font-size:14px}.track{height:8px;margin-top:16px;overflow:hidden;border-radius:99px;background:#30343d}.bar{width:18%;height:100%;border-radius:99px;background:linear-gradient(90deg,#75b4ff,#4f7df3);transition:width .15s ease}.bar.indeterminate{animation:scan 1.2s ease-in-out infinite}@keyframes scan{0%{transform:translateX(-120%)}100%{transform:translateX(620%)}}.detail{min-height:20px;margin-top:10px;color:#aeb5c2;font-size:12px;font-variant-numeric:tabular-nums}.note{margin-top:20px;color:#8f98a8;font-size:12px;line-height:18px}
-</style></head><body><main class="card"><div class="title">${copy.title}</div><div id="stage" class="stage">${copy.checking}</div><div class="track"><div id="bar" class="bar indeterminate"></div></div><div id="detail" class="detail"></div><div class="note">${copy.preserved}</div></main>
+</style></head><body><main class="card"><div class="title">${copy.title}</div><div id="stage" class="stage">${copy.checking}</div><div class="track"><div id="bar" class="bar indeterminate"></div></div><div id="detail" class="detail"></div><div class="note">${copy.preserved}</div><div class="note">${copy.pauseNote}</div></main>
 <script>globalThis.cedardshUpdateProgress=(state)=>{document.getElementById('stage').textContent=state.stage;document.getElementById('detail').textContent=state.detail||'';const bar=document.getElementById('bar');if(state.percent===null){bar.classList.add('indeterminate');bar.style.width='18%'}else{bar.classList.remove('indeterminate');bar.style.transform='none';bar.style.width=Math.max(0,Math.min(100,state.percent))+'%'}}</script></body></html>`
 }
 
@@ -399,11 +406,10 @@ async function openUpdateProgress(stage) {
     parent: mainWindow ?? undefined,
     modal: mainWindow !== null,
     width: 470,
-    height: 235,
+    height: 255,
     resizable: false,
     minimizable: false,
     maximizable: false,
-    closable: false,
     autoHideMenuBar: true,
     show: false,
     backgroundColor: '#15171d',
@@ -412,6 +418,15 @@ async function openUpdateProgress(stage) {
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   updateProgressWindow = progressWindow
+  progressWindow.on('close', () => {
+    // Closing the progress window cancels an in-flight download; the partial
+    // file survives so the next update attempt resumes from the same progress.
+    if (activeUpdateRequest === null) return
+    cancelUpdateRequested = true
+    activeUpdateRequest.abort()
+    activeUpdateRequest = null
+    appendLog('update download cancelled by closing the progress window; partial download kept for resume')
+  })
   progressWindow.on('closed', () => {
     if (updateProgressWindow === progressWindow) updateProgressWindow = null
   })
@@ -469,23 +484,53 @@ function readPackagedManifest() {
   return { manifest, currentPortableVersion }
 }
 
-async function checkForUpdate(respectInterval) {
-  const { manifest, currentPortableVersion } = readPackagedManifest()
-  const state = readUpdateState()
-  if (respectInterval && !shouldCheck(state.lastCheckedAt)) {
-    return { skipped: true, manifest, currentPortableVersion, update: null }
-  }
+/** List one directory, treating a missing directory as empty. */
+function safeDirectoryEntries(directory) {
   try {
-    const update = availableUpdate(currentPortableVersion, await fetchPublicReleases(net.fetch))
-    return { skipped: false, manifest, currentPortableVersion, update }
-  } finally {
-    state.lastCheckedAt = new Date().toISOString()
-    writeUpdateState(state)
-    if (mainWindow !== null && !mainWindow.isDestroyed()) {
-      void publishDesktopInfo(mainWindow)
-        .catch(error => appendLog(`desktop info refresh failed: ${error.message}`))
-    }
+    return fs.readdirSync(directory)
+  } catch (error) {
+    if (error.code === 'ENOENT') return []
+    throw error
   }
+}
+
+/**
+ * Remove update state for other portable versions and legacy per-run staging
+ * directories; the current version's stable work directory is preserved.
+ *
+ * @param {string} versionRoot Version-scoped update directory.
+ * @param {string} currentVersion Portable version being staged.
+ */
+function removeObsoleteUpdateState(versionRoot, currentVersion) {
+  const base = path.dirname(versionRoot)
+  for (const entry of safeDirectoryEntries(base)) {
+    if (entry === currentVersion) continue
+    removeUpdateTree(path.join(base, entry))
+  }
+  for (const entry of safeDirectoryEntries(versionRoot)) {
+    if (entry === 'work') continue
+    removeUpdateTree(path.join(versionRoot, entry))
+  }
+}
+
+/**
+ * Keep a completed archive, its verified digest, and any partial download;
+ * remove every derived staging artifact from an interrupted earlier attempt.
+ *
+ * @param {string} work Stable staging directory.
+ * @param {string} assetName Release asset ZIP name.
+ */
+function removeDerivedUpdateWork(work, assetName) {
+  const kept = new Set([assetName, `${assetName}.partial`, `${assetName}.sha256`])
+  for (const entry of safeDirectoryEntries(work)) {
+    if (kept.has(entry)) continue
+    removeUpdateTree(path.join(work, entry))
+  }
+}
+
+/** Record the verified digest beside a completed archive for resume reuse. */
+function recordArchiveDigest(archive, sha256) {
+  fs.writeFileSync(`${archive}.sha256`, sha256, 'utf8')
 }
 
 async function stageAndLaunchUpdate(update, currentManifest) {
@@ -496,19 +541,54 @@ async function stageAndLaunchUpdate(update, currentManifest) {
 
   const versionRoot = updateWorkDirectory(ROOT, update.version)
   fs.mkdirSync(versionRoot, { recursive: true })
-  const work = fs.mkdtempSync(path.join(versionRoot, 'run-'))
-  try {
-    const archive = path.join(work, update.asset.name)
+  removeObsoleteUpdateState(versionRoot, update.version)
+  const work = path.join(versionRoot, 'work')
+  fs.mkdirSync(work, { recursive: true })
+  const archive = path.join(work, update.asset.name)
+  removeDerivedUpdateWork(work, update.asset.name)
+
+  activeUpdateRequest = null
+  cancelUpdateRequested = false
+  const copy = updateCopy()
+  const downloadStage = partialResumeOffset(archive, update.asset.size) > 0 ? copy.resuming : copy.downloading
+
+  const downloadUpdateArchive = async () => {
     let lastProgressAt = 0
     await downloadReleaseAsset(update.asset, archive, {
-      requestImpl: net.request,
+      requestImpl: (requestOptions) => {
+        const request = net.request(requestOptions)
+        activeUpdateRequest = request
+        return request
+      },
       onProgress: (progress) => {
         const now = Date.now()
         if (progress.transferred !== progress.total && now - lastProgressAt < 100) return
         lastProgressAt = now
-        void setUpdateProgress(updateCopy().downloading, progress)
+        void setUpdateProgress(downloadStage, progress)
       },
     })
+    activeUpdateRequest = null
+    recordArchiveDigest(archive, update.asset.sha256)
+  }
+
+  try {
+    // A complete archive from an earlier attempt is already SHA-256 verified
+    // against the digest recorded beside it; download only what is missing.
+    if (fs.existsSync(archive)) {
+      let recorded = null
+      try {
+        recorded = fs.readFileSync(`${archive}.sha256`, 'utf8').trim()
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error
+      }
+      if (recorded !== update.asset.sha256) {
+        fs.rmSync(archive, { force: true })
+        fs.rmSync(`${archive}.sha256`, { force: true })
+        await downloadUpdateArchive()
+      }
+    } else {
+      await downloadUpdateArchive()
+    }
 
     const extractRoot = path.join(work, 'extract')
     let lastExtractProgressAt = 0
@@ -518,11 +598,11 @@ async function stageAndLaunchUpdate(update, currentManifest) {
         const now = Date.now()
         if (progress.transferred !== progress.total && now - lastExtractProgressAt < 100) return
         lastExtractProgressAt = now
-        const copy = updateCopy()
-        void setUpdateProgress(copy.extracting, progress, copy.entries)
+        const extractCopy = updateCopy()
+        void setUpdateProgress(extractCopy.extracting, progress, extractCopy.entries)
       },
     })
-    await setUpdateProgress(updateCopy().preparing)
+    await setUpdateProgress(copy.preparing)
     const extracted = fs.readdirSync(extractRoot)
     if (extracted.length !== 1 || extracted[0] !== 'CedarDSH-Desktop') {
       throw new Error('update ZIP must contain exactly one CedarDSH-Desktop directory')
@@ -546,12 +626,36 @@ async function stageAndLaunchUpdate(update, currentManifest) {
     ])
     return stagedManifest
   } catch (error) {
+    // Keep the archive and any partial download for a later resume; drop the
+    // derived artifacts that would collide with the next staging attempt.
     try {
-      removeUpdateTree(work)
+      removeDerivedUpdateWork(work, update.asset.name)
     } catch (cleanupError) {
       appendLog(`update staging cleanup failed: ${cleanupError.message}`)
     }
+    if (cancelUpdateRequested) {
+      throw Object.assign(new Error('update download cancelled by user'), { cancelled: true })
+    }
     throw error
+  }
+}
+
+async function checkForUpdate(respectInterval) {
+  const { manifest, currentPortableVersion } = readPackagedManifest()
+  const state = readUpdateState()
+  if (respectInterval && !shouldCheck(state.lastCheckedAt)) {
+    return { skipped: true, manifest, currentPortableVersion, update: null }
+  }
+  try {
+    const update = availableUpdate(currentPortableVersion, await fetchPublicReleases(net.fetch))
+    return { skipped: false, manifest, currentPortableVersion, update }
+  } finally {
+    state.lastCheckedAt = new Date().toISOString()
+    writeUpdateState(state)
+    if (mainWindow !== null && !mainWindow.isDestroyed()) {
+      void publishDesktopInfo(mainWindow)
+        .catch(error => appendLog(`desktop info refresh failed: ${error.message}`))
+    }
   }
 }
 
@@ -580,8 +684,13 @@ async function offerUpdate(update, currentPortableVersion, currentManifest) {
 
 function showUpdateFailure(error) {
   closeUpdateProgress()
+  if (error !== null && typeof error === 'object' && error.cancelled === true) {
+    appendLog('update cancelled by closing the progress window; partial download kept for resume')
+    return
+  }
   const message = error instanceof Error ? error.message : String(error)
   appendLog(`update failed: ${message}`)
+  if (shuttingDown) return
   dialog.showErrorBox(updateCopy().failed, message)
 }
 
@@ -671,6 +780,10 @@ function shutdown(code) {
   if (shuttingDown) return
   shuttingDown = true
   stopStartupWatcher()
+  if (activeUpdateRequest !== null) {
+    activeUpdateRequest.abort()
+    activeUpdateRequest = null
+  }
   void drainStartupAndProcesses()
     .catch((error) => appendLog(`process shutdown failed: ${error.message}`))
     .finally(() => {
