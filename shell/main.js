@@ -78,6 +78,7 @@ const MANIFEST_PATH = path.join(ROOT, 'manifest.json')
 const UPDATE_STATE_PATH = path.join(DSH_HOME, 'update-state.json')
 const UPDATE_PATCH_PATH = path.join(__dirname, 'cedardsh.patch.yml')
 const UPDATE_HELPER_PATH = path.join(__dirname, 'update-helper.ps1')
+const UPDATE_LAUNCHER_PATH = path.join(__dirname, 'update-launcher.ps1')
 const DIAGNOSTICS_REQUEST_PATH = '/__cedardsh/diagnostics'
 const RELEASES_REQUEST_PATH = '/__cedardsh/releases'
 const RELEASES_URL = 'https://github.com/maiziman/cedardsh-desktop/releases'
@@ -444,17 +445,19 @@ function closeUpdateProgress() {
   if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1)
 }
 
-function launchDetachedUpdater(helperPath, args) {
+function runUpdateLauncher(args) {
   return new Promise((resolve, reject) => {
     const child = spawn(POWERSHELL_EXE, [
       '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', helperPath,
+      '-File', UPDATE_LAUNCHER_PATH,
       ...args,
-    ], { detached: true, windowsHide: true, stdio: 'ignore' })
+    ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    child.stderr.on('data', chunk => { stderr = (stderr + chunk.toString()).slice(-8192) })
     child.once('error', reject)
-    child.once('spawn', () => {
-      child.unref()
-      resolve()
+    child.once('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(stderr.trim() || `update launcher exited with code ${String(code)}`))
     })
   })
 }
@@ -487,6 +490,7 @@ async function checkForUpdate(respectInterval) {
 
 async function stageAndLaunchUpdate(update, currentManifest) {
   if (!fs.existsSync(UPDATE_HELPER_PATH)) throw new Error(`update helper is missing: ${UPDATE_HELPER_PATH}`)
+  if (!fs.existsSync(UPDATE_LAUNCHER_PATH)) throw new Error(`update launcher is missing: ${UPDATE_LAUNCHER_PATH}`)
   if (!fs.existsSync(POWERSHELL_EXE)) throw new Error(`Windows PowerShell is missing: ${POWERSHELL_EXE}`)
   ownedTopLevelEntries(currentManifest)
 
@@ -528,13 +532,17 @@ async function stageAndLaunchUpdate(update, currentManifest) {
     assertNoOwnershipCollisions(ROOT, currentManifest, stagedManifest)
 
     const helperCopy = path.join(os.tmpdir(), `cedardsh-update-helper-${process.pid}-${Date.now()}.ps1`)
+    const readyPath = path.join(work, 'handoff.ready')
+    const errorPath = path.join(work, 'handoff.error')
     fs.copyFileSync(UPDATE_HELPER_PATH, helperCopy)
-    await launchDetachedUpdater(helperCopy, [
-      '-Mode', 'Install',
+    await runUpdateLauncher([
+      '-HelperPath', helperCopy,
       '-RootPath', ROOT,
       '-StagedRootPath', stagedRoot,
       '-WorkPath', work,
       '-ParentProcessId', String(process.pid),
+      '-ReadyPath', readyPath,
+      '-ErrorPath', errorPath,
     ])
     return stagedManifest
   } catch (error) {

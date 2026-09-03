@@ -451,6 +451,7 @@ Copy-Item (Join-Path $psRoot 'shell\diagnostics.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\deepseek-mark.svg') $stagingShell -ErrorAction Stop
 Copy-Item (Join-Path $psRoot 'shell\update.js') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\update-install.js') $stagingShell
+Copy-Item (Join-Path $psRoot 'shell\update-launcher.ps1') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\update-helper.ps1') $stagingShell
 Copy-Item (Join-Path $psRoot 'shell\cedardsh.patch.yml') $stagingShell
 $stagedIcon = Join-Path $stagingShell 'icon.ico'

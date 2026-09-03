@@ -6,10 +6,17 @@ param(
   [string]$StagedRootPath,
   [string]$WorkPath,
   [int]$ParentProcessId = 0,
+  [string]$ReadyPath,
+  [string]$ErrorPath,
   [switch]$SkipRestart
 )
 
 $ErrorActionPreference = 'Stop'
+
+trap {
+  [IO.File]::WriteAllText([IO.Path]::GetFullPath($ErrorPath), $_.Exception.Message)
+  exit 1
+}
 
 function Get-FullPath([string]$Value) {
   return [IO.Path]::GetFullPath($Value).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
@@ -72,21 +79,32 @@ function Remove-UpdatePath([string]$Path) {
 }
 
 if ([string]::IsNullOrWhiteSpace($RootPath) -or [string]::IsNullOrWhiteSpace($StagedRootPath) `
-    -or [string]::IsNullOrWhiteSpace($WorkPath) -or $ParentProcessId -le 0) {
-  throw 'install mode requires RootPath, StagedRootPath, WorkPath, and ParentProcessId'
+    -or [string]::IsNullOrWhiteSpace($WorkPath) -or [string]::IsNullOrWhiteSpace($ReadyPath) `
+    -or [string]::IsNullOrWhiteSpace($ErrorPath) `
+    -or $ParentProcessId -le 0) {
+  throw 'install mode requires RootPath, StagedRootPath, WorkPath, ParentProcessId, ReadyPath, and ErrorPath'
 }
 
 $root = Get-FullPath $RootPath
 $stagedRoot = Get-FullPath $StagedRootPath
 $work = Get-FullPath $WorkPath
+$ready = Get-FullPath $ReadyPath
+$errorReport = Get-FullPath $ErrorPath
 $updatesRoot = Get-FullPath (Join-Path $root '.cedardsh-update')
 Assert-ChildPath $updatesRoot $work 'update work directory'
 Assert-ChildPath $work $stagedRoot 'staged package'
+Assert-ChildPath $work $ready 'update handoff marker'
+Assert-ChildPath $work $errorReport 'update handoff error'
 if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "portable root is missing: $root" }
 if (-not (Test-Path -LiteralPath $stagedRoot -PathType Container)) { throw "staged package is missing: $stagedRoot" }
+if (Test-Path -LiteralPath $ready) { throw "update handoff marker already exists: $ready" }
 
-$currentManifest = Get-Content -Raw -LiteralPath (Join-Path $root 'manifest.json') | ConvertFrom-Json
-$nextManifest = Get-Content -Raw -LiteralPath (Join-Path $stagedRoot 'manifest.json') | ConvertFrom-Json
+$currentManifestPath = Join-Path $root 'manifest.json'
+$nextManifestPath = Join-Path $stagedRoot 'manifest.json'
+if (-not (Test-Path -LiteralPath $currentManifestPath -PathType Leaf)) { throw 'current manifest is missing' }
+if (-not (Test-Path -LiteralPath $nextManifestPath -PathType Leaf)) { throw 'staged manifest is missing' }
+$currentManifest = Get-Content -Raw -LiteralPath $currentManifestPath | ConvertFrom-Json
+$nextManifest = Get-Content -Raw -LiteralPath $nextManifestPath | ConvertFrom-Json
 $currentEntries = Get-OwnedEntries $currentManifest 'current'
 $nextEntries = Get-OwnedEntries $nextManifest 'staged'
 $managedEntries = @($currentEntries + $nextEntries | Sort-Object -Unique)
@@ -94,13 +112,15 @@ $backupRoot = Join-Path $work 'old'
 $backedUp = [Collections.Generic.List[string]]::new()
 $placed = [Collections.Generic.List[string]]::new()
 
-$deadline = [DateTime]::UtcNow.AddSeconds(120)
-while (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) {
-  if ([DateTime]::UtcNow -ge $deadline) { throw "CedarDSH Desktop process $ParentProcessId did not exit within 120 seconds" }
-  Start-Sleep -Milliseconds 250
-}
-
+Write-UpdateLog $root "independent updater accepted handoff for $($currentManifest.portableVersion) -> $($nextManifest.portableVersion)"
+[IO.File]::WriteAllText($ready, 'ready')
 try {
+  $deadline = [DateTime]::UtcNow.AddSeconds(120)
+  while (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) {
+    if ([DateTime]::UtcNow -ge $deadline) { throw "CedarDSH Desktop process $ParentProcessId did not exit within 120 seconds" }
+    Start-Sleep -Milliseconds 250
+  }
+
   $currentEntrySet = @{}
   foreach ($entry in $currentEntries) { $currentEntrySet[$entry] = $true }
   foreach ($entry in $nextEntries) {
@@ -141,6 +161,7 @@ try {
     'resources\app\diagnostics.js',
     'resources\app\deepseek-mark.svg',
     'resources\app\update.js',
+    'resources\app\update-launcher.ps1',
     'resources\app\update-helper.ps1',
     'resources\app\update-install.js',
     'resources\app\cedardsh.patch.yml',

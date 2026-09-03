@@ -102,7 +102,7 @@ if (-not (Test-Path -LiteralPath $shellRoot -PathType Container)) {
 }
 foreach ($shellFile in @(
   'package.json', 'main.js', 'startup-progress.js', 'launch-args.js', 'process-lifecycle.js', 'diagnostics.js',
-  'update.js', 'update-install.js', 'update-helper.ps1', 'cedardsh.patch.yml', 'deepseek-mark.svg', 'icon.ico'
+  'update.js', 'update-install.js', 'update-launcher.ps1', 'update-helper.ps1', 'cedardsh.patch.yml', 'deepseek-mark.svg', 'icon.ico'
 )) {
   if (-not (Test-Path -LiteralPath (Join-Path $shellRoot $shellFile) -PathType Leaf)) {
     throw "extraction incomplete: packaged desktop shell file missing: $shellFile"

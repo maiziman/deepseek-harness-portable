@@ -31,6 +31,7 @@ const REQUIRED_PACKAGE_FILES = [
   path.join('resources', 'app', 'diagnostics.js'),
   path.join('resources', 'app', 'deepseek-mark.svg'),
   path.join('resources', 'app', 'update.js'),
+  path.join('resources', 'app', 'update-launcher.ps1'),
   path.join('resources', 'app', 'update-helper.ps1'),
   path.join('resources', 'app', 'update-install.js'),
   path.join('resources', 'app', 'cedardsh.patch.yml'),

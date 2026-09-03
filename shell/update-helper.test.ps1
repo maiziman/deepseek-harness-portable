@@ -1,8 +1,9 @@
 $ErrorActionPreference = 'Stop'
 
 $helper = Join-Path $PSScriptRoot 'update-helper.ps1'
+$launcher = Join-Path $PSScriptRoot 'update-launcher.ps1'
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$testRoot = Join-Path ([IO.Path]::GetTempPath()) "cedardsh-update-helper-test-$([guid]::NewGuid().ToString('N'))"
+$testRoot = Join-Path ([IO.Path]::GetTempPath()) "cedardsh update helper test $([guid]::NewGuid().ToString('N'))"
 
 function Write-Package([string]$Root, [string]$Version, [string[]]$Owned, [string]$Marker, [string]$OmitRequiredFile = '') {
   foreach ($directory in @(
@@ -29,6 +30,7 @@ function Write-Package([string]$Root, [string]$Version, [string[]]$Owned, [strin
       'resources\app\diagnostics.js',
       'resources\app\deepseek-mark.svg',
       'resources\app\update.js',
+      'resources\app\update-launcher.ps1',
       'resources\app\update-helper.ps1',
       'resources\app\update-install.js',
       'resources\app\cedardsh.patch.yml',
@@ -55,6 +57,12 @@ function Assert-Equal($Actual, $Expected, [string]$Message) {
 
 try {
   New-Item -ItemType Directory -Path $testRoot | Out-Null
+  $spacedScriptRoot = Join-Path $testRoot 'update scripts'
+  New-Item -ItemType Directory -Path $spacedScriptRoot | Out-Null
+  $spacedHelper = Join-Path $spacedScriptRoot 'update helper.ps1'
+  $spacedLauncher = Join-Path $spacedScriptRoot 'update launcher.ps1'
+  Copy-Item -LiteralPath $helper -Destination $spacedHelper
+  Copy-Item -LiteralPath $launcher -Destination $spacedLauncher
   $ownedCurrent = @('app', 'runtime', 'resources', 'CedarDSH-Desktop.exe', 'manifest.json', 'obsolete.dll')
   $ownedNext = @('app', 'runtime', 'resources', 'CedarDSH-Desktop.exe', 'manifest.json')
 
@@ -86,10 +94,27 @@ try {
   Set-Content -LiteralPath (Join-Path $successSentinelRoot 'sentinel.txt') -Value 'keep' -NoNewline
   New-Item -ItemType Junction -Path (Join-Path $successRoot 'app\external-link') -Target $successSentinelRoot | Out-Null
 
-  & $powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper `
-    -Mode Install -RootPath $successRoot -StagedRootPath $successStage -WorkPath $successWork `
-    -ParentProcessId 2000000000 -SkipRestart
-  if ($LASTEXITCODE -ne 0) { throw "successful helper case exited $LASTEXITCODE" }
+  $parentScript = Join-Path $testRoot 'parent.ps1'
+  Set-Content -LiteralPath $parentScript -Value 'Start-Sleep -Seconds 5'
+  $quotedParentScript = '"' + $parentScript + '"'
+  $parent = Start-Process -FilePath $powershell `
+    -ArgumentList @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $quotedParentScript) `
+    -WindowStyle Hidden -PassThru
+  & $powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $spacedLauncher `
+    -HelperPath $spacedHelper -RootPath $successRoot -StagedRootPath $successStage -WorkPath $successWork `
+    -ParentProcessId $parent.Id -ReadyPath (Join-Path $successWork 'handoff.ready') `
+    -ErrorPath (Join-Path $successWork 'handoff.error') -SkipRestart
+  if ($LASTEXITCODE -ne 0) { throw "successful launcher case exited $LASTEXITCODE" }
+  Assert-Equal (Get-Content -Raw (Join-Path $successRoot 'app\marker.txt')) 'old' 'update started before the parent exited'
+  $parent.WaitForExit()
+  $installDeadline = [DateTime]::UtcNow.AddSeconds(10)
+  $successMarker = Join-Path $successRoot 'app\marker.txt'
+  while (-not (Test-Path -LiteralPath $successMarker) `
+      -or (Get-Content -Raw -LiteralPath $successMarker) -cne 'new' `
+      -or (Test-Path -LiteralPath $successWork)) {
+    if ([DateTime]::UtcNow -ge $installDeadline) { throw 'independent updater did not replace the package after the parent exited' }
+    Start-Sleep -Milliseconds 100
+  }
   Assert-Equal (Get-Content -Raw (Join-Path $successRoot 'app\marker.txt')) 'new' 'app was not updated'
   Assert-Equal (Get-Content -Raw (Join-Path $successRoot 'dsh-home\history.txt')) 'history' 'history changed'
   Assert-Equal (Get-Content -Raw (Join-Path $successRoot 'workspace\user.txt')) 'workspace' 'workspace changed'
@@ -97,6 +122,25 @@ try {
   Assert-Equal (Get-Content -Raw (Join-Path $successSentinelRoot 'sentinel.txt')) 'keep' 'successful cleanup entered a junction target'
   if (Test-Path -LiteralPath $successWork) { throw 'successful update work directory was not removed' }
   if (Test-Path -LiteralPath (Join-Path $successRoot 'obsolete.dll')) { throw 'obsolete owned file was not removed' }
+
+  # A handoff rejected before readiness returns the helper's exact error.
+  $preflightRoot = Join-Path $testRoot 'preflight\CedarDSH-Desktop'
+  $preflightWork = Join-Path $preflightRoot '.cedardsh-update\1.3.0\run-preflight'
+  $preflightStage = Join-Path $preflightWork 'extract\CedarDSH-Desktop'
+  New-Item -ItemType Directory -Force -Path $preflightRoot, $preflightStage | Out-Null
+  Write-Package $preflightRoot '1.2.2' $ownedCurrent 'old'
+  $ErrorActionPreference = 'Continue'
+  $preflightOutput = & $powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $spacedLauncher `
+    -HelperPath $spacedHelper -RootPath $preflightRoot -StagedRootPath $preflightStage -WorkPath $preflightWork `
+    -ParentProcessId $PID -ReadyPath (Join-Path $preflightWork 'handoff.ready') `
+    -ErrorPath (Join-Path $preflightWork 'handoff.error') -SkipRestart 2>&1
+  $preflightExitCode = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($preflightExitCode -eq 0) { throw 'preflight failure unexpectedly succeeded' }
+  if (($preflightOutput | Out-String) -notmatch 'staged manifest is missing') {
+    throw "preflight failure hid the helper error: $($preflightOutput | Out-String)"
+  }
+  Assert-Equal (Get-Content -Raw (Join-Path $preflightRoot 'app\marker.txt')) 'old' 'program changed during preflight failure'
 
   # Failed replacement: a missing required file forces the old program back in place.
   $rollbackRoot = Join-Path $testRoot 'rollback\CedarDSH-Desktop'
@@ -114,7 +158,8 @@ try {
 
   & $powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper `
     -Mode Install -RootPath $rollbackRoot -StagedRootPath $rollbackStage -WorkPath $rollbackWork `
-    -ParentProcessId 2000000000 -SkipRestart
+    -ParentProcessId 2000000000 -ReadyPath (Join-Path $rollbackWork 'handoff.ready') `
+    -ErrorPath (Join-Path $rollbackWork 'handoff.error') -SkipRestart
   if ($LASTEXITCODE -eq 0) { throw 'rollback helper case unexpectedly succeeded' }
   Assert-Equal (Get-Content -Raw (Join-Path $rollbackRoot 'app\marker.txt')) 'old' 'old app was not restored'
   Assert-Equal (Get-Content -Raw (Join-Path $rollbackRoot 'runtime\marker.txt')) 'old' 'old runtime was not restored'
@@ -135,7 +180,8 @@ try {
 
   & $powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper `
     -Mode Install -RootPath $collisionRoot -StagedRootPath $collisionStage -WorkPath $collisionWork `
-    -ParentProcessId 2000000000 -SkipRestart
+    -ParentProcessId 2000000000 -ReadyPath (Join-Path $collisionWork 'handoff.ready') `
+    -ErrorPath (Join-Path $collisionWork 'handoff.error') -SkipRestart
   if ($LASTEXITCODE -eq 0) { throw 'ownership collision helper case unexpectedly succeeded' }
   Assert-Equal (Get-Content -Raw (Join-Path $collisionRoot 'new-runtime.dll')) 'user file' 'unowned root file changed'
   Assert-Equal (Get-Content -Raw (Join-Path $collisionRoot 'app\marker.txt')) 'old' 'program changed during ownership collision'
@@ -145,7 +191,7 @@ try {
   $resolvedTestRoot = [IO.Path]::GetFullPath($testRoot)
   $resolvedTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
   if ($resolvedTestRoot.StartsWith($resolvedTemp, [StringComparison]::OrdinalIgnoreCase) -and
-      [IO.Path]::GetFileName($resolvedTestRoot).StartsWith('cedardsh-update-helper-test-')) {
+      [IO.Path]::GetFileName($resolvedTestRoot).StartsWith('cedardsh update helper test ')) {
     Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force -ErrorAction SilentlyContinue
   }
 }
