@@ -1,9 +1,7 @@
 param(
   [Parameter(Mandatory = $true)]
-  [ValidateSet('Extract', 'Install')]
+  [ValidateSet('Install')]
   [string]$Mode,
-  [string]$ArchivePath,
-  [string]$DestinationPath,
   [string]$RootPath,
   [string]$StagedRootPath,
   [string]$WorkPath,
@@ -71,18 +69,6 @@ function Remove-UpdatePath([string]$Path) {
     Remove-UpdatePath $child.FullName
   }
   [IO.Directory]::Delete($item.FullName, $false)
-}
-
-if ($Mode -eq 'Extract') {
-  if ([string]::IsNullOrWhiteSpace($ArchivePath) -or -not (Test-Path -LiteralPath $ArchivePath -PathType Leaf)) {
-    throw 'update archive is missing'
-  }
-  if ([string]::IsNullOrWhiteSpace($DestinationPath)) { throw 'update extraction destination is missing' }
-  $destination = Get-FullPath $DestinationPath
-  if (Test-Path -LiteralPath $destination) { throw "update extraction destination already exists: $destination" }
-  New-Item -ItemType Directory -Path $destination | Out-Null
-  Expand-Archive -LiteralPath (Get-FullPath $ArchivePath) -DestinationPath $destination
-  exit 0
 }
 
 if ([string]::IsNullOrWhiteSpace($RootPath) -or [string]::IsNullOrWhiteSpace($StagedRootPath) `

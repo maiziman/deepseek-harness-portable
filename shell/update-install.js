@@ -1,6 +1,7 @@
 'use strict'
 
 const crypto = require('node:crypto')
+const { spawn } = require('node:child_process')
 const fs = require('node:fs')
 const path = require('node:path')
 const { Transform } = require('node:stream')
@@ -86,6 +87,70 @@ function updateWorkDirectory(root, version) {
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) return '0 MB'
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** Count non-empty newline-delimited archive entries from a child stream. */
+function entryCounter(onEntry) {
+  let pending = ''
+  return {
+    write(chunk) {
+      const lines = (pending + chunk.toString()).split(/\r?\n/u)
+      pending = lines.pop()
+      for (const line of lines) {
+        if (line.length > 0) onEntry()
+      }
+    },
+    end() {
+      if (pending.length > 0) onEntry()
+    },
+  }
+}
+
+/** Run Windows tar and return the number of archive entries it reports. */
+function runTar(tarPath, args, spawnImpl = spawn, entrySource = 'stdout', onEntry = () => {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawnImpl(tarPath, args, {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    let entries = 0
+    let stderr = ''
+    const counter = entryCounter(() => {
+      entries += 1
+      onEntry(entries)
+    })
+    child.stdout.on('data', chunk => {
+      if (entrySource === 'stdout') counter.write(chunk)
+    })
+    child.stderr.on('data', chunk => {
+      stderr = (stderr + chunk.toString()).slice(-8192)
+      if (entrySource === 'stderr') counter.write(chunk)
+    })
+    child.once('error', reject)
+    child.once('close', (code) => {
+      counter.end()
+      if (code === 0) resolve(entries)
+      else reject(new Error(stderr.trim() || `tar exited with code ${String(code)}`))
+    })
+  })
+}
+
+/** Extract a ZIP with Windows tar and report exact archive-entry progress. */
+async function extractArchive(archivePath, destinationPath, options) {
+  const total = await runTar(options.tarPath, ['-tf', archivePath], options.spawnImpl, 'stdout')
+  if (total === 0) throw new Error('update archive is empty')
+  if (fs.existsSync(destinationPath)) throw new Error(`update extraction destination already exists: ${destinationPath}`)
+  fs.mkdirSync(destinationPath)
+  const extracted = await runTar(
+    options.tarPath,
+    ['-xvf', archivePath, '-C', destinationPath],
+    options.spawnImpl,
+    'stderr',
+    transferred => options.onProgress({ transferred, total }),
+  )
+  if (extracted !== total) {
+    throw new Error(`update archive entry count mismatch: ${String(extracted)} != ${String(total)}`)
+  }
 }
 
 /** Open a GitHub Release asset through Electron's Chromium network stack. */
@@ -317,6 +382,7 @@ module.exports = {
   UPDATE_REQUEST_PATH,
   assertNoOwnershipCollisions,
   downloadReleaseAsset,
+  extractArchive,
   formatBytes,
   isDesktopRequest,
   isDesktopUpdateRequest,

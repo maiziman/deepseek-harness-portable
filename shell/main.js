@@ -41,6 +41,7 @@ const {
 const {
   assertNoOwnershipCollisions,
   downloadReleaseAsset,
+  extractArchive,
   formatBytes,
   isDesktopRequest,
   isDesktopUpdateRequest,
@@ -95,6 +96,7 @@ const POWERSHELL_EXE = path.join(
   'v1.0',
   'powershell.exe',
 )
+const TAR_EXE = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe')
 
 const URL_PATTERN = /dsh web: (http:\/\/\S+)/
 const STARTUP_STARTED_AT = Date.now()
@@ -342,7 +344,9 @@ function updateCopy() {
         title: 'CedarDSH Desktop 更新',
         checking: '正在检查官方更新…',
         downloading: '正在下载官方主程序…',
-        preparing: '正在校验并准备更新…',
+        extracting: '正在快速解压更新…',
+        preparing: '正在校验更新包…',
+        entries: '项',
         restarting: '更新已准备完成，正在重启…',
         preserved: '会话历史、模型设置、凭据、插件和工作区都会保留。',
         available: version => `发现新版本 ${version}`,
@@ -358,7 +362,9 @@ function updateCopy() {
         title: 'CedarDSH Desktop update',
         checking: 'Checking for an official update…',
         downloading: 'Downloading the official application…',
-        preparing: 'Verifying and preparing the update…',
+        extracting: 'Extracting the update…',
+        preparing: 'Verifying the update…',
+        entries: 'items',
         restarting: 'Update is ready. Restarting…',
         preserved: 'Session history, model settings, credentials, plugins, and workspaces will be preserved.',
         available: version => `Version ${version} is available`,
@@ -414,11 +420,15 @@ async function openUpdateProgress(stage) {
   await setUpdateProgress(stage)
 }
 
-async function setUpdateProgress(stage, progress = null) {
+async function setUpdateProgress(stage, progress = null, unit = null) {
   const target = updateProgressWindow
   if (target === null || target.isDestroyed()) return
   const percent = progress === null ? null : Math.round((progress.transferred / progress.total) * 1000) / 10
-  const detail = progress === null ? '' : `${formatBytes(progress.transferred)} / ${formatBytes(progress.total)} · ${percent.toFixed(1)}%`
+  const detail = progress === null
+    ? ''
+    : unit === null
+      ? `${formatBytes(progress.transferred)} / ${formatBytes(progress.total)} · ${percent.toFixed(1)}%`
+      : `${progress.transferred.toLocaleString()} / ${progress.total.toLocaleString()} ${unit} · ${percent.toFixed(1)}%`
   const payload = JSON.stringify({ stage, detail, percent }).replace(/</gu, '\\u003c')
   await target.webContents.executeJavaScript(`globalThis.cedardshUpdateProgress(${payload})`, true)
     .catch((error) => appendLog(`update progress display failed: ${error.message}`))
@@ -432,23 +442,6 @@ function closeUpdateProgress() {
   if (updateProgressWindow !== null && !updateProgressWindow.isDestroyed()) updateProgressWindow.destroy()
   updateProgressWindow = null
   if (mainWindow !== null && !mainWindow.isDestroyed()) mainWindow.setProgressBar(-1)
-}
-
-function runPowerShell(scriptPath, args) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(POWERSHELL_EXE, [
-      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', scriptPath,
-      ...args,
-    ], { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe'] })
-    let stderr = ''
-    child.stderr.on('data', chunk => { stderr += chunk.toString() })
-    child.on('error', reject)
-    child.on('exit', (code) => {
-      if (code === 0) resolve()
-      else reject(new Error(stderr.trim() || `PowerShell exited with code ${String(code)}`))
-    })
-  })
 }
 
 function launchDetachedUpdater(helperPath, args) {
@@ -513,13 +506,19 @@ async function stageAndLaunchUpdate(update, currentManifest) {
       },
     })
 
-    await setUpdateProgress(updateCopy().preparing)
     const extractRoot = path.join(work, 'extract')
-    await runPowerShell(UPDATE_HELPER_PATH, [
-      '-Mode', 'Extract',
-      '-ArchivePath', archive,
-      '-DestinationPath', extractRoot,
-    ])
+    let lastExtractProgressAt = 0
+    await extractArchive(archive, extractRoot, {
+      tarPath: TAR_EXE,
+      onProgress: (progress) => {
+        const now = Date.now()
+        if (progress.transferred !== progress.total && now - lastExtractProgressAt < 100) return
+        lastExtractProgressAt = now
+        const copy = updateCopy()
+        void setUpdateProgress(copy.extracting, progress, copy.entries)
+      },
+    })
+    await setUpdateProgress(updateCopy().preparing)
     const extracted = fs.readdirSync(extractRoot)
     if (extracted.length !== 1 || extracted[0] !== 'CedarDSH-Desktop') {
       throw new Error('update ZIP must contain exactly one CedarDSH-Desktop directory')

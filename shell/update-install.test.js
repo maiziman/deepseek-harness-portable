@@ -6,12 +6,13 @@ const { EventEmitter } = require('node:events')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { Readable } = require('node:stream')
+const { PassThrough, Readable } = require('node:stream')
 const test = require('node:test')
 
 const {
   assertNoOwnershipCollisions,
   downloadReleaseAsset,
+  extractArchive,
   isDesktopRequest,
   isDesktopUpdateRequest,
   isTrustedDownloadUrl,
@@ -21,6 +22,22 @@ const {
   updateWorkDirectory,
   validateStagedPackage,
 } = require('./update-install.js')
+
+function tarSpawn(outputs, calls) {
+  return (command, args, options) => {
+    calls.push({ command, args, options })
+    const output = outputs.shift()
+    const child = new EventEmitter()
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    setImmediate(() => {
+      child.stdout.end(output.stdout)
+      child.stderr.end(output.stderr || '')
+      setImmediate(() => child.emit('close', output.code || 0))
+    })
+    return child
+  }
+}
 
 function responseFor(payload) {
   const response = Readable.from([payload])
@@ -62,6 +79,48 @@ test('the sidebar request must target the running local DSH origin', () => {
     'http://127.0.0.1:43123/',
     '/__cedardsh/diagnostics',
   ), true)
+})
+
+test('archive extraction uses Windows tar and reports exact entry progress', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-extract-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+  const destination = path.join(directory, 'extract')
+  const calls = []
+  const progress = []
+
+  await extractArchive('update.zip', destination, {
+    tarPath: 'C:\\Windows\\System32\\tar.exe',
+    spawnImpl: tarSpawn([
+      { stdout: 'CedarDSH-Desktop/\nCedarDSH-Desktop/app/\nCedarDSH-Desktop/app/main.js\n' },
+      { stderr: 'CedarDSH-Desktop/\r\nCedarDSH-Desktop/app/\r\nCedarDSH-Desktop/app/main.js\r\n' },
+    ], calls),
+    onProgress: state => progress.push(state),
+  })
+
+  assert.equal(fs.statSync(destination).isDirectory(), true)
+  assert.deepEqual(calls.map(call => call.args), [
+    ['-tf', 'update.zip'],
+    ['-xvf', 'update.zip', '-C', destination],
+  ])
+  assert.deepEqual(progress, [
+    { transferred: 1, total: 3 },
+    { transferred: 2, total: 3 },
+    { transferred: 3, total: 3 },
+  ])
+})
+
+test('archive extraction rejects a different listed and extracted entry count', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cedardsh-extract-count-test-'))
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
+
+  await assert.rejects(extractArchive('update.zip', path.join(directory, 'extract'), {
+    tarPath: 'tar.exe',
+    spawnImpl: tarSpawn([
+      { stdout: 'one\ntwo\n' },
+      { stderr: 'one\n' },
+    ], []),
+    onProgress: () => {},
+  }), /entry count mismatch/u)
 })
 
 test('asset downloads stay on GitHub and match the published digest and size', async (t) => {

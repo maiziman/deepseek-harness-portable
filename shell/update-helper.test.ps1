@@ -64,9 +64,11 @@ try {
   New-Item -ItemType Directory -Force -Path $archiveSource | Out-Null
   Set-Content -LiteralPath (Join-Path $archiveSource 'marker.txt') -Value 'archive' -NoNewline
   Compress-Archive -LiteralPath $archiveSource -DestinationPath $archivePath
-  & $powershell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $helper `
-    -Mode Extract -ArchivePath $archivePath -DestinationPath $extractDestination
-  if ($LASTEXITCODE -ne 0) { throw "extract helper case exited $LASTEXITCODE" }
+  $extractModule = Join-Path $PSScriptRoot 'update-install.js'
+  $tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+  & node -e "const {extractArchive}=require(process.argv[1]);extractArchive(process.argv[2],process.argv[3],{tarPath:process.argv[4],onProgress:()=>{}}).catch(error=>{console.error(error);process.exitCode=1})" `
+    $extractModule $archivePath $extractDestination $tar
+  if ($LASTEXITCODE -ne 0) { throw "extract case exited $LASTEXITCODE" }
   Assert-Equal (Get-Content -Raw (Join-Path $extractDestination 'CedarDSH-Desktop\marker.txt')) 'archive' 'archive was not extracted'
 
   # Successful replacement: program entries change, preserved and unknown files do not.
